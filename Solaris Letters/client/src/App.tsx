@@ -1,0 +1,65 @@
+import { useEffect } from 'react';
+import { BrowserRouter, Routes, Route, Navigate, useNavigate } from 'react-router-dom';
+import { supabase } from './lib/supabase';
+import HomePage from './pages/HomePage';
+import LoginPage from './pages/Login';
+import RegisterPage from './pages/Register';
+
+function ProtectedRoute({ children }: { children: React.ReactNode }) {
+  const token = localStorage.getItem('cosmimail_token');
+  if (!token) return <Navigate to="/login" replace />;
+  return <>{children}</>;
+}
+
+function PublicRoute({ children }: { children: React.ReactNode }) {
+  const token = localStorage.getItem('cosmimail_token');
+  if (token) return <Navigate to="/home" replace />;
+  return <>{children}</>;
+}
+
+function AuthListener() {
+  const navigate = useNavigate();
+  useEffect(() => {
+    const { data: { subscription } } = supabase.auth.onAuthStateChange(
+      async (event, session) => {
+        if (event === 'TOKEN_REFRESHED' && session) {
+          localStorage.setItem('cosmimail_token', session.access_token);
+        }
+        if (event === 'SIGNED_OUT') {
+          localStorage.removeItem('cosmimail_token');
+          localStorage.removeItem('cosmimail_user');
+          navigate('/login');
+        }
+      }
+    );
+    return () => subscription.unsubscribe();
+  }, [navigate]);
+  return null;
+}
+
+export default function App() {
+  return (
+    <BrowserRouter>
+      <AuthListener />
+      <Routes>
+        <Route path="/" element={<Navigate to="/home" replace />} />
+        <Route path="/login" element={
+          <PublicRoute>
+            <LoginPage />
+          </PublicRoute>
+        } />
+        <Route path="/register" element={
+          <PublicRoute>
+            <RegisterPage />
+          </PublicRoute>
+        } />
+        <Route path="/home" element={
+          <ProtectedRoute>
+            <HomePage />
+          </ProtectedRoute>
+        } />
+        <Route path="*" element={<Navigate to="/home" replace />} />
+      </Routes>
+    </BrowserRouter>
+  );
+}

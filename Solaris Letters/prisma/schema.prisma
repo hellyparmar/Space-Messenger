@@ -1,0 +1,151 @@
+generator client {
+  provider = "prisma-client-js"
+  output   = "../server/node_modules/.prisma/client"
+}
+
+datasource db {
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL")
+}
+
+// ── Matches the Supabase `users` table ───────────────────────────────────────
+model User {
+  id                String   @id @default(uuid())
+  cosmic_id         String   @unique
+  display_name      String
+  bio               String   @default("")
+  avatar_icon       String?
+  cosmic_id_changes Int      @default(0)
+  planet_type       Int      @default(0)
+  planet_hue        Float    @default(0)
+  orbit_radius      Float?
+  is_active    Boolean  @default(true)
+  unread_count Int      @default(0)
+  created_at   DateTime @default(now())
+  updated_at   DateTime @updatedAt
+
+  sentLetters      Letter[]     @relation("SentLetters")
+  receivedLetters  Letter[]     @relation("ReceivedLetters")
+  friendships      Friendship[] @relation("UserFriendships")
+  friendOf         Friendship[] @relation("FriendFriendships")
+  groupMemberships GroupMember[]
+  createdGroups    Group[]
+
+  sentRequests     FriendRequest[] @relation("SentRequests")
+  receivedRequests FriendRequest[] @relation("ReceivedRequests")
+  planetAssignments PlanetAssignment[] @relation("UserAssignments")
+  friendAssignments PlanetAssignment[] @relation("FriendAssignments")
+  groupMessages    GroupMessage[]
+
+  @@map("users")
+}
+
+// ── Matches the Supabase `letters` table ─────────────────────────────────────
+model Letter {
+  id             String    @id @default(uuid())
+  sender_id      String
+  recipient_id   String
+  body           String
+  stickers       Json      @default("[]")
+  paper_skin     String    @default("parchment")
+  is_future_self Boolean   @default(false)
+  deliver_at     DateTime  @default(now())
+  sent_at        DateTime  @default(now())
+  read_at        DateTime?
+  notified_at    DateTime?   // set when socket notification is fired; scheduler uses this to skip already-notified letters
+  is_archived    Boolean   @default(false)
+
+  sender    User @relation("SentLetters",     fields: [sender_id],    references: [id])
+  receiver  User @relation("ReceivedLetters", fields: [recipient_id], references: [id])
+
+  @@map("letters")
+}
+
+// ── Matches the Supabase `friendships` table ─────────────────────────────────
+model Friendship {
+  id                String   @id @default(uuid())
+  user_id           String
+  friend_id         String
+  interaction_score Int      @default(0)
+  added_at          DateTime @default(now())
+
+  user   User @relation("UserFriendships",  fields: [user_id],   references: [id])
+  friend User @relation("FriendFriendships", fields: [friend_id], references: [id])
+
+  @@unique([user_id, friend_id])
+  @@map("friendships")
+}
+
+// ── Friend Requests ──────────────────────────────────────────────────────────
+model FriendRequest {
+  id         String   @id @default(uuid())
+  sender_id  String
+  target_id  String
+  status     String   @default("pending")
+  created_at DateTime @default(now())
+
+  sender     User @relation("SentRequests", fields: [sender_id], references: [id])
+  target     User @relation("ReceivedRequests", fields: [target_id], references: [id])
+
+  @@unique([sender_id, target_id])
+  @@map("friend_requests")
+}
+
+// ── Planet Assignments ───────────────────────────────────────────────────────
+model PlanetAssignment {
+  user_id     String
+  friend_id   String
+  planet_name String
+  created_at  DateTime @default(now())
+
+  user        User @relation("UserAssignments", fields: [user_id], references: [id])
+  friend      User @relation("FriendAssignments", fields: [friend_id], references: [id])
+
+  @@id([user_id, friend_id])
+  @@map("planet_assignments")
+}
+
+// ── Matches the Supabase `groups` table ──────────────────────────────────────
+model Group {
+  id               String   @id @default(uuid())
+  name             String
+  cosmic_position  Json?
+  theme_color      String   @default("#7c3aed")
+  created_by       String
+  created_at       DateTime @default(now())
+
+  creator  User          @relation(fields: [created_by], references: [id])
+  members  GroupMember[]
+  messages GroupMessage[]
+
+  @@map("groups")
+}
+
+// ── Matches the Supabase `group_members` table ───────────────────────────────
+model GroupMember {
+  group_id  String
+  user_id   String
+  role      String   @default("member")
+  joined_at DateTime @default(now())
+
+  group Group @relation(fields: [group_id], references: [id])
+  user  User  @relation(fields: [user_id],  references: [id])
+
+  @@id([group_id, user_id])
+  @@map("group_members")
+}
+
+// ── Group Messages ───────────────────────────────────────────────────────────
+model GroupMessage {
+  id         String   @id @default(uuid())
+  group_id   String
+  sender_id  String
+  content    String
+  created_at DateTime @default(now())
+
+  group      Group @relation(fields: [group_id], references: [id])
+  sender     User  @relation(fields: [sender_id], references: [id])
+
+  @@map("group_messages")
+}
