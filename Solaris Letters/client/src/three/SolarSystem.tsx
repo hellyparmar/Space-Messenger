@@ -46,6 +46,133 @@ function SpaceBackground() {
   );
 }
 
+// ─── DYNAMIC COSMIC COMETS BACKGROUND ─────────────────────────────────────────
+function Comets() {
+  const count = 12; // Active comet slots
+  const lineRefs = useRef<(THREE.LineSegments | null)[]>([]);
+
+  // Pre-generate comet parameters for speed and visual variety
+  const cometsData = useMemo(() => {
+    const data = [];
+    for (let i = 0; i < count; i++) {
+      const isGold = Math.random() > 0.6;
+      const baseColor = isGold 
+        ? new THREE.Color('#ffb300') // Solaris Golden Comet
+        : new THREE.Color('#4A9EFF'); // Deep Space Ice Blue Comet
+
+      data.push({
+        position: new THREE.Vector3(),
+        direction: new THREE.Vector3(),
+        speed: 100 + Math.random() * 120, // Graceful slower speed
+        length: 40 + Math.random() * 60, // Sleeker, shorter initial length
+        active: false,
+        timer: Math.random() * 8, // staggered initial start times
+        width: 0.8 + Math.random() * 1.0, // Thinner, more elegant trail
+        color: baseColor,
+      });
+    }
+    return data;
+  }, []);
+
+  useFrame((_state, delta) => {
+    cometsData.forEach((comet, idx) => {
+      const line = lineRefs.current[idx];
+      if (!line) return;
+
+      if (!comet.active) {
+        comet.timer -= delta;
+        if (comet.timer <= 0) {
+          // Re-spawn the comet in the outer system
+          comet.active = true;
+          
+          // Random point on a distant hemisphere facing the solar system
+          const angle = Math.random() * Math.PI * 2;
+          const radius = 3500 + Math.random() * 1500;
+          comet.position.set(
+            Math.cos(angle) * radius,
+            (Math.random() - 0.5) * 1600 + 500, // floating above/below plane
+            Math.sin(angle) * radius
+          );
+
+          // Path direction: heading across the screen toward the opposite hemisphere
+          comet.direction.set(
+            -Math.cos(angle) + (Math.random() - 0.5) * 0.4,
+            (Math.random() - 0.5) * 0.2,
+            -Math.sin(angle) + (Math.random() - 0.5) * 0.4
+          ).normalize();
+
+          comet.speed = 100 + Math.random() * 120; // Graceful slower speed
+          comet.length = 50 + Math.random() * 80; // Sleeker, shorter active length
+          comet.timer = 12 + Math.random() * 15; // lifetime / next spawn delay
+        }
+        line.visible = false;
+      } else {
+        // Move the comet
+        comet.position.addScaledVector(comet.direction, comet.speed * delta);
+
+        // Deactivate if it travels too far out
+        if (comet.position.length() > 6000) {
+          comet.active = false;
+          comet.timer = 4 + Math.random() * 8; // delay before next flight
+        } else {
+          line.visible = true;
+
+          // Update the line coordinates for the fading trail
+          const positions = line.geometry.attributes.position.array as Float32Array;
+          
+          // Head (Point A)
+          positions[0] = comet.position.x;
+          positions[1] = comet.position.y;
+          positions[2] = comet.position.z;
+
+          // Tail (Point B: behind the head along negative direction)
+          const tailPos = comet.position.clone().addScaledVector(comet.direction, -comet.length);
+          positions[3] = tailPos.x;
+          positions[4] = tailPos.y;
+          positions[5] = tailPos.z;
+
+          line.geometry.attributes.position.needsUpdate = true;
+        }
+      }
+    });
+  });
+
+  return (
+    <group>
+      {cometsData.map((comet, idx) => {
+        // Create custom geometry for the trail line segment
+        const geometry = new THREE.BufferGeometry();
+        const positions = new Float32Array(6); // 2 vertices, 3 dimensions
+        geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+
+        // Color gradient: Head (bright white-core) to Tail (neon base color)
+        const colors = new Float32Array([
+          1.0, 1.0, 1.0, // White head
+          comet.color.r * 0.15, comet.color.g * 0.15, comet.color.b * 0.15 // Fading tail
+        ]);
+        geometry.setAttribute('color', new THREE.BufferAttribute(colors, 3));
+
+        return (
+          <lineSegments
+            key={idx}
+            ref={(el) => { lineRefs.current[idx] = el; }}
+            geometry={geometry}
+          >
+            <lineBasicMaterial
+              vertexColors
+              transparent
+              opacity={0.85}
+              blending={THREE.AdditiveBlending}
+              linewidth={comet.width}
+              depthWrite={false}
+            />
+          </lineSegments>
+        );
+      })}
+    </group>
+  );
+}
+
 // ─── 3D VOLUMETRIC NEBULA (particle cloud) ───────────────────────────────────
 // Each nebula is ~25,000 tiny sprites scattered in a 3D ellipsoid shaped by
 // fractal noise. Sprites always face the camera → truly volumetric from any angle.
@@ -175,6 +302,8 @@ void main() { vUv = uv; gl_Position = projectionMatrix * modelViewMatrix * vec4(
 const BH_DISC_FRAG = `
 uniform float uTime;
 uniform float uOpacity;
+uniform vec3 uColor;
+uniform bool uUseCustomColor;
 varying vec2 vUv;
 
 float hash(vec2 p){return fract(sin(dot(p,vec2(127.1,311.7)))*43758.5453);}
@@ -209,25 +338,42 @@ void main() {
   float stripe = 0.5 + 0.5 * sin((r - inner) / (outer - inner) * 28.0);
   turb = mix(turb, turb * stripe, 0.25);
 
-  // ── Thermal gradient (white-hot → gold → orange → deep crimson) ────────────
+  // ── Thermal gradient or Custom color gradient ──────────────────────────────
   vec3 col;
-  if      (t < 0.05) col = mix(vec3(1.00,1.00,0.98), vec3(1.00,0.92,0.65), t/0.05);
-  else if (t < 0.20) col = mix(vec3(1.00,0.92,0.65), vec3(1.00,0.70,0.10), (t-0.05)/0.15);
-  else if (t < 0.45) col = mix(vec3(1.00,0.70,0.10), vec3(0.98,0.30,0.02), (t-0.20)/0.25);
-  else if (t < 0.72) col = mix(vec3(0.98,0.30,0.02), vec3(0.60,0.08,0.01), (t-0.45)/0.27);
-  else               col = mix(vec3(0.60,0.08,0.01), vec3(0.12,0.01,0.00), (t-0.72)/0.28);
+  if (uUseCustomColor) {
+    vec3 brightCore = vec3(1.0, 1.0, 1.0);
+    vec3 midColor = uColor;
+    vec3 outerColor = uColor * 0.15;
+    if (t < 0.15) {
+      col = mix(brightCore, midColor, t / 0.15);
+    } else {
+      col = mix(midColor, outerColor, (t - 0.15) / 0.85);
+    }
+  } else {
+    if      (t < 0.05) col = mix(vec3(1.00,1.00,0.98), vec3(1.00,0.92,0.65), t/0.05);
+    else if (t < 0.20) col = mix(vec3(1.00,0.92,0.65), vec3(1.00,0.70,0.10), (t-0.05)/0.15);
+    else if (t < 0.45) col = mix(vec3(1.00,0.70,0.10), vec3(0.98,0.30,0.02), (t-0.20)/0.25);
+    else if (t < 0.72) col = mix(vec3(0.98,0.30,0.02), vec3(0.60,0.08,0.01), (t-0.45)/0.27);
+    else               col = mix(vec3(0.60,0.08,0.01), vec3(0.12,0.01,0.00), (t-0.72)/0.28);
+  }
 
   // ── Photon ring — ultra-sharp bright halo at innermost edge ────────────────
   float pRing1 = exp(-abs(r - inner - 0.008) * 130.0);  // primary photon ring
   float pRing2 = exp(-abs(r - inner - 0.022) * 80.0);   // secondary lensed image
-  col += vec3(1.00,0.97,0.85) * pRing1 * 6.0;
-  col += vec3(1.00,0.85,0.55) * pRing2 * 2.5;
+  vec3 pCol1 = uUseCustomColor ? mix(vec3(1.0, 0.98, 0.95), uColor, 0.4) : vec3(1.00,0.97,0.85);
+  vec3 pCol2 = uUseCustomColor ? mix(vec3(1.0, 0.92, 0.80), uColor, 0.4) : vec3(1.00,0.85,0.55);
+  col += pCol1 * pRing1 * 6.0;
+  col += pCol2 * pRing2 * 2.5;
 
   // ── Relativistic Doppler — approaching side brighter, bluer, hotter ────────
   // Static asymmetry (no geometry spin): left side approaches, right recedes
   float dop = 0.35 + 0.90 * (sin(ang) * 0.5 + 0.5);
   col *= pow(dop, 1.8);           // beaming: I ∝ dop^4 approx; use 1.8 for cinematic feel
-  col.b += max(0.0, sin(ang)) * 0.22;
+  if (uUseCustomColor) {
+    col += uColor * max(0.0, sin(ang)) * 0.18;
+  } else {
+    col.b += max(0.0, sin(ang)) * 0.22;
+  }
 
   // ── Gas turbulence brightness ───────────────────────────────────────────────
   col *= 0.50 + turb * 0.80;
@@ -292,7 +438,12 @@ function InterstellarBlackHole() {
   }, []);
 
   // ── Shader uniforms ─────────────────────────────────────────────────────────
-  const discUniforms = useMemo(() => ({ uTime: { value: 0 }, uOpacity: { value: 0 } }), []);
+  const discUniforms = useMemo(() => ({
+    uTime: { value: 0 },
+    uOpacity: { value: 0 },
+    uColor: { value: new THREE.Color() },
+    uUseCustomColor: { value: false }
+  }), []);
 
   // ── Refs ────────────────────────────────────────────────────────────────────
   const discGroupRef = useRef<THREE.Group>(null!);
@@ -361,6 +512,385 @@ function InterstellarBlackHole() {
           blending={THREE.AdditiveBlending} depthWrite={false} opacity={0} />
       </sprite>
     </group>
+  );
+}
+
+// Helper to convert hex to RGB
+function hexToRgb(hex: string) {
+  const result = /^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(hex);
+  return result ? {
+    r: parseInt(result[1], 16),
+    g: parseInt(result[2], 16),
+    b: parseInt(result[3], 16)
+  } : { r: 255, g: 255, b: 255 };
+}
+
+// Decorative background black holes spread throughout the Milky Way volume
+const DECORATIVE_BLACK_HOLES = [
+  {
+    id: 'dbh-1',
+    position: [-7800, -200, 4200] as [number, number, number],
+    color: '#88AAFF',
+    radius: 25,
+    rotationSpeed: 0.04,
+    tilt: [Math.PI * 0.12, 0.35, 0.08] as [number, number, number]
+  },
+  {
+    id: 'dbh-2',
+    position: [-10500, 300, 7800] as [number, number, number],
+    color: '#FF9933',
+    radius: 15,
+    rotationSpeed: 0.06,
+    tilt: [Math.PI * -0.08, 0.15, -0.12] as [number, number, number]
+  },
+  {
+    id: 'dbh-3',
+    position: [3500, -400, 4500] as [number, number, number],
+    color: '#FFEEAA',
+    radius: 20,
+    rotationSpeed: 0.03,
+    tilt: [Math.PI * 0.05, -0.22, 0.05] as [number, number, number]
+  },
+  {
+    id: 'dbh-4',
+    position: [-8500, -1200, 2800] as [number, number, number],
+    color: '#FF5522',
+    radius: 40,
+    rotationSpeed: 0.05,
+    tilt: [Math.PI * 0.15, 0.45, -0.06] as [number, number, number]
+  },
+  {
+    id: 'dbh-5',
+    position: [-14000, 200, 6500] as [number, number, number],
+    color: '#9944FF',
+    radius: 12,
+    rotationSpeed: 0.07,
+    tilt: [Math.PI * -0.12, -0.3, 0.15] as [number, number, number]
+  },
+  {
+    id: 'dbh-6',
+    position: [-6000, 1800, 8500] as [number, number, number],
+    color: '#44DDFF',
+    radius: 10,
+    rotationSpeed: 0.08,
+    tilt: [Math.PI * 0.10, 0.25, 0.02] as [number, number, number]
+  }
+];
+
+function DecorativeBlackHole({ position, color, radius, rotationSpeed, tilt }: {
+  position: [number, number, number];
+  color: string;
+  radius: number;
+  rotationSpeed: number;
+  tilt: [number, number, number];
+}) {
+  const R = radius;
+  
+  // Dynamic custom textures based on hex color to perfectly match the accretion disc
+  const coronaTex = useMemo(() => {
+    const { r, g, b } = hexToRgb(color);
+    const c = document.createElement('canvas'); c.width = c.height = 512;
+    const ctx = c.getContext('2d')!;
+    const gRad = ctx.createRadialGradient(256,256,0, 256,256,256);
+    gRad.addColorStop(0.00, `rgba(${r},${g},${b},0.60)`);
+    gRad.addColorStop(0.18, `rgba(${Math.floor(r*0.75)},${Math.floor(g*0.75)},${Math.floor(b*0.75)},0.28)`);
+    gRad.addColorStop(0.42, `rgba(${Math.floor(r*0.5)},${Math.floor(g*0.5)},${Math.floor(b*0.5)},0.10)`);
+    gRad.addColorStop(0.70, `rgba(${Math.floor(r*0.25)},${Math.floor(g*0.25)},${Math.floor(b*0.25)},0.04)`);
+    gRad.addColorStop(1.00, 'rgba(0,0,0,0)');
+    ctx.fillStyle = gRad; ctx.fillRect(0,0,512,512);
+    return new THREE.CanvasTexture(c);
+  }, [color]);
+
+  const photonTex = useMemo(() => {
+    const { r, g, b } = hexToRgb(color);
+    const c = document.createElement('canvas'); c.width = c.height = 512;
+    const ctx = c.getContext('2d')!;
+    const ringR = 0.38;
+    const N = 512;
+    const imgData = ctx.createImageData(N, N);
+    for (let y = 0; y < N; y++) {
+      for (let x = 0; x < N; x++) {
+        const dx = (x - N/2) / (N/2);
+        const dy = (y - N/2) / (N/2);
+        const rad  = Math.sqrt(dx*dx + dy*dy);
+        const br = Math.exp(-Math.pow((rad - ringR) / 0.032, 2));
+        const i  = (y * N + x) * 4;
+        imgData.data[i  ] = Math.floor(r * 0.9 + 25 * Math.max(0, 1 - rad/ringR));
+        imgData.data[i+1] = Math.floor(g * 0.9 + 25 * Math.max(0, 1 - rad/ringR));
+        imgData.data[i+2] = Math.floor(b * 0.9 + 25 * Math.max(0, 1 - rad/ringR));
+        imgData.data[i+3] = Math.floor(br * 240);
+      }
+    }
+    ctx.putImageData(imgData, 0, 0);
+    return new THREE.CanvasTexture(c);
+  }, [color]);
+
+  const discUniforms = useMemo(() => ({
+    uTime: { value: 0 },
+    uOpacity: { value: 0 },
+    uColor: { value: new THREE.Color(color) },
+    uUseCustomColor: { value: true }
+  }), [color]);
+
+  const discGroupRef = useRef<THREE.Group>(null!);
+  const discMeshRef  = useRef<THREE.Mesh>(null!);
+  const discMatRef   = useRef<THREE.ShaderMaterial>(null!);
+  const coronaRef    = useRef<THREE.SpriteMaterial>(null!);
+  const photonRef    = useRef<THREE.SpriteMaterial>(null!);
+  const sphereRef    = useRef<THREE.Mesh>(null!);
+  const sphereMatRef = useRef<THREE.MeshBasicMaterial>(null!);
+
+  useFrame(({ camera, clock }, delta) => {
+    // Fade in between camera distance 900 and 1800 units
+    const dist = camera.position.length();
+    const op = THREE.MathUtils.smoothstep(dist, 900, 1800);
+    const t  = clock.elapsedTime;
+    
+    if (discMatRef.current) {
+      discMatRef.current.uniforms.uTime.value = t;
+      discMatRef.current.uniforms.uOpacity.value = op;
+    }
+    if (coronaRef.current) coronaRef.current.opacity = op * 0.90;
+    if (photonRef.current) photonRef.current.opacity = op * 0.98;
+    
+    if (sphereRef.current) {
+      sphereRef.current.visible = op > 0.001;
+    }
+    if (sphereMatRef.current) {
+      sphereMatRef.current.opacity = op;
+    }
+    if (discMeshRef.current) {
+      discMeshRef.current.rotation.z += rotationSpeed * delta;
+    }
+  });
+
+  const planeSize = R * 12.5;
+
+  return (
+    <group>
+      {/* ── 1. Wide corona glow (always faces camera) ── */}
+      <sprite position={position} scale={[R * 40, R * 40, 1]}>
+        <spriteMaterial ref={coronaRef} map={coronaTex} transparent
+          blending={THREE.AdditiveBlending} depthWrite={false} opacity={0} />
+      </sprite>
+
+      {/* ── 2. Accretion disc — custom GLSL shader plane, rotates slowly ── */}
+      <group ref={discGroupRef} position={position} rotation={tilt}>
+        <mesh ref={discMeshRef} renderOrder={1}>
+          <planeGeometry args={[planeSize, planeSize]} />
+          <shaderMaterial
+            ref={discMatRef as any}
+            vertexShader={BH_VERT}
+            fragmentShader={BH_DISC_FRAG}
+            uniforms={discUniforms}
+            transparent
+            depthWrite={false}
+            depthTest={true}
+            blending={THREE.AdditiveBlending}
+            side={THREE.DoubleSide}
+          />
+        </mesh>
+      </group>
+
+      {/* ── 3. Event horizon sphere — pure black, writes depth, occludes disc ── */}
+      <mesh
+        ref={sphereRef}
+        position={position}
+        renderOrder={2}
+      >
+        <sphereGeometry args={[R * 1.01, 64, 64]} />
+        <meshBasicMaterial ref={sphereMatRef} color="#000000" transparent depthWrite={true} opacity={0} />
+      </mesh>
+
+      {/* ── 4. Photon ring sprite (tight bright halo around sphere) ── */}
+      <sprite position={position} scale={[R * 7, R * 7, 1]}>
+        <spriteMaterial ref={photonRef} map={photonTex} transparent
+          blending={THREE.AdditiveBlending} depthWrite={false} opacity={0} />
+      </sprite>
+    </group>
+  );
+}
+
+// Decorative deep background galaxies spread across all sky quadrants
+const DEEP_BACKGROUND_GALAXIES = [
+  {
+    id: 'dbg-1',
+    position: [22000, 3000, -16000] as [number, number, number],
+    scale: [3500, 1400, 1] as [number, number, number],
+    color: '#AABBFF',
+    rotationSpeed: 0.01,
+    opacityMax: 0.75,
+    canvasAngle: 0.3
+  },
+  {
+    id: 'dbg-2',
+    position: [-28000, 4000, -8000] as [number, number, number],
+    scale: [2000, 2000, 1] as [number, number, number],
+    color: '#FFDDAA',
+    rotationSpeed: 0.006,
+    opacityMax: 0.70,
+    canvasAngle: 1.2
+  },
+  {
+    id: 'dbg-3',
+    position: [18000, -1000, 12000] as [number, number, number],
+    scale: [2800, 400, 1] as [number, number, number],
+    color: '#CCDDFF',
+    rotationSpeed: 0.012,
+    opacityMax: 0.70,
+    canvasAngle: -0.5
+  },
+  {
+    id: 'dbg-4',
+    position: [-20000, -3000, 14000] as [number, number, number],
+    scale: [2200, 900, 1] as [number, number, number],
+    color: '#FFD080',
+    rotationSpeed: 0.008,
+    opacityMax: 0.65,
+    canvasAngle: 0.8
+  },
+  {
+    id: 'dbg-5',
+    position: [8000, 12000, -18000] as [number, number, number],
+    scale: [1200, 800, 1] as [number, number, number],
+    color: '#FFEECC',
+    rotationSpeed: 0.014,
+    opacityMax: 0.60,
+    canvasAngle: -1.0
+  },
+  {
+    id: 'dbg-6',
+    position: [24000, -5000, 8000] as [number, number, number],
+    scale: [1800, 700, 1] as [number, number, number],
+    color: '#BBCCFF',
+    rotationSpeed: 0.011,
+    opacityMax: 0.65,
+    canvasAngle: 0.5
+  },
+  {
+    id: 'dbg-7',
+    position: [-5000, 2000, -28000] as [number, number, number],
+    scale: [1000, 400, 1] as [number, number, number],
+    color: '#DDEEFF',
+    rotationSpeed: 0.005,
+    opacityMax: 0.40,
+    canvasAngle: 2.1
+  },
+  {
+    id: 'dbg-8a',
+    position: [-25000, 1000, 10000] as [number, number, number],
+    scale: [1600, 600, 1] as [number, number, number],
+    color: '#FFD0AA',
+    rotationSpeed: 0.007,
+    opacityMax: 0.65,
+    canvasAngle: -0.2
+  },
+  {
+    id: 'dbg-8b',
+    position: [-24400, 1300, 9700] as [number, number, number],
+    scale: [1200, 480, 1] as [number, number, number],
+    color: '#FFAA88',
+    rotationSpeed: -0.009,
+    opacityMax: 0.55,
+    canvasAngle: 0.4
+  },
+  {
+    id: 'dbg-9',
+    position: [3000, -20000, 6000] as [number, number, number],
+    scale: [1400, 560, 1] as [number, number, number],
+    color: '#AACCFF',
+    rotationSpeed: 0.015,
+    opacityMax: 0.60,
+    canvasAngle: -0.7
+  },
+  {
+    id: 'dbg-10',
+    position: [-16000, 2500, 12000] as [number, number, number],
+    scale: [800, 320, 1] as [number, number, number],
+    color: '#FFEECC',
+    rotationSpeed: 0.013,
+    opacityMax: 0.55,
+    canvasAngle: 0.1
+  }
+];
+
+function DeepBackgroundGalaxy({ position, scale, color, rotationSpeed, opacityMax, canvasAngle }: {
+  position: [number, number, number];
+  scale: [number, number, number];
+  color: string;
+  rotationSpeed: number;
+  opacityMax: number;
+  canvasAngle: number;
+}) {
+  const texture = useMemo(() => {
+    const canvas = document.createElement('canvas');
+    canvas.width = 300;
+    canvas.height = 120;
+    const ctx = canvas.getContext('2d')!;
+    const { r, g, b } = hexToRgb(color);
+
+    ctx.save();
+    // Translate to center of 300x120 canvas
+    ctx.translate(150, 60);
+    // Rotate canvas to simulate different viewing angles
+    ctx.rotate(canvasAngle);
+    // Scale vertically to make it a perfect oval
+    ctx.scale(1.0, 0.4);
+
+    // Draw radial gradient centered at (0, 0)
+    const grd = ctx.createRadialGradient(0, 0, 0, 0, 0, 150);
+    grd.addColorStop(0.0, `rgba(${r},${g},${b},1.0)`);
+    grd.addColorStop(0.25, `rgba(${r},${g},${b},0.65)`);
+    grd.addColorStop(0.60, `rgba(${r},${g},${b},0.20)`);
+    grd.addColorStop(1.0, 'rgba(0,0,0,0)');
+
+    ctx.fillStyle = grd;
+    ctx.beginPath();
+    ctx.arc(0, 0, 150, 0, Math.PI * 2);
+    ctx.fill();
+
+    // Draw subtle star clusters along the oval shape to create realistic galaxy details
+    for (let i = 0; i < 180; i++) {
+      const radius = Math.pow(Math.random(), 1.6) * 140;
+      const theta = Math.random() * Math.PI * 2;
+      const sx = Math.cos(theta) * radius;
+      const sy = Math.sin(theta) * radius * 0.4;
+      ctx.fillStyle = Math.random() > 0.45 ? '#ffffff' : `rgb(${r},${g},${b})`;
+      ctx.globalAlpha = Math.random() * 0.8;
+      ctx.beginPath();
+      ctx.arc(sx, sy, Math.random() * 1.3 + 0.3, 0, Math.PI * 2);
+      ctx.fill();
+    }
+
+    ctx.restore();
+    return new THREE.CanvasTexture(canvas);
+  }, [color, canvasAngle]);
+
+  const matRef = useRef<THREE.SpriteMaterial>(null!);
+
+  useFrame(({ camera }, delta) => {
+    const dist = camera.position.length();
+    // Fade in between camera distance 3500 and 6000 from origin
+    const op = THREE.MathUtils.smoothstep(dist, 3500, 6000);
+    
+    if (matRef.current) {
+      matRef.current.opacity = op * opacityMax;
+      // Very slowly rotate sprite around its own center
+      matRef.current.rotation += rotationSpeed * delta;
+    }
+  });
+
+  return (
+    <sprite position={position} scale={scale}>
+      <spriteMaterial
+        ref={matRef}
+        map={texture}
+        transparent
+        blending={THREE.AdditiveBlending}
+        depthWrite={false}
+        opacity={0}
+      />
+    </sprite>
   );
 }
 
@@ -1001,6 +1531,162 @@ const GLOBULAR_CLUSTERS: Array<{ position:[number,number,number]; radius:number 
   { position: [-22000, -6000,  2000],  radius: 95  },
 ];
 
+interface Volumetric3DGalaxyGasProps {
+  baseAngle: number;
+  color: string;
+  opacityRef: React.MutableRefObject<number>;
+  size: number;
+}
+
+function Volumetric3DGalaxyGas({ baseAngle, color, opacityRef, size }: Volumetric3DGalaxyGasProps) {
+  const pointsRef = useRef<THREE.Points>(null!);
+  
+  const { pos, col, count } = useMemo(() => {
+    const COUNT = 32000;
+    const pos = new Float32Array(COUNT * 3);
+    const col = new Float32Array(COUNT * 3);
+    const baseColor = new THREE.Color(color);
+    
+    for (let i = 0; i < COUNT; i++) {
+      const t = Math.pow(Math.random(), 0.9);
+      const wind = t * Math.PI * 3.4;
+      
+      const theta = baseAngle + wind + (Math.random() - 0.5) * (0.32 + (1 - t) * 0.25);
+      const r = 180 + t * 5600;
+      
+      const ySpread = Math.max(15, 230 * (1 - t)); 
+      const yOff = (Math.random() - 0.5) * ySpread;
+      
+      const scatter = 60 + t * 650;
+      const rOff = (Math.random() - 0.5) * scatter;
+      
+      pos[i * 3]     = Math.cos(theta) * (r + rOff);
+      pos[i * 3 + 1] = yOff;
+      pos[i * 3 + 2] = Math.sin(theta) * (r + rOff);
+      
+      const c = baseColor.clone().multiplyScalar(0.85 + Math.random() * 0.3);
+      col[i * 3]     = c.r;
+      col[i * 3 + 1] = c.g;
+      col[i * 3 + 2] = c.b;
+    }
+    return { pos, col, count: COUNT };
+  }, [baseAngle, color]);
+
+  const gasTex = useMemo(() => {
+    const c = document.createElement('canvas'); c.width = c.height = 128;
+    const ctx = c.getContext('2d')!;
+    const g = ctx.createRadialGradient(64,64,0, 64,64,64);
+    g.addColorStop(0,   'rgba(255,255,255,1.0)');
+    g.addColorStop(0.2, 'rgba(255,255,255,0.72)');
+    g.addColorStop(0.5, 'rgba(255,255,255,0.22)');
+    g.addColorStop(0.8, 'rgba(255,255,255,0.05)');
+    g.addColorStop(1,   'rgba(0,0,0,0)');
+    ctx.fillStyle = g; ctx.fillRect(0,0,128,128);
+    const tex = new THREE.CanvasTexture(c);
+    tex.colorSpace = THREE.SRGBColorSpace;
+    return tex;
+  }, []);
+
+  useFrame(() => {
+    if (pointsRef.current) {
+      (pointsRef.current.material as THREE.PointsMaterial).opacity = opacityRef.current;
+    }
+  });
+
+  return (
+    <points ref={pointsRef}>
+      <bufferGeometry>
+        <bufferAttribute attach="attributes-position" args={[pos, 3]} count={count} array={pos} itemSize={3} />
+        <bufferAttribute attach="attributes-color"    args={[col, 3]} count={count} array={col} itemSize={3} />
+      </bufferGeometry>
+      <pointsMaterial 
+        size={size} 
+        vertexColors 
+        transparent 
+        blending={THREE.AdditiveBlending} 
+        sizeAttenuation 
+        depthWrite={false} 
+        map={gasTex} 
+        alphaTest={0.001} 
+      />
+    </points>
+  );
+}
+
+interface Volumetric3DCoreGasProps {
+  opacityRef: React.MutableRefObject<number>;
+}
+
+function Volumetric3DCoreGas({ opacityRef }: Volumetric3DCoreGasProps) {
+  const pointsRef = useRef<THREE.Points>(null!);
+  
+  const { pos, col, count } = useMemo(() => {
+    const COUNT = 16000;
+    const pos = new Float32Array(COUNT * 3);
+    const col = new Float32Array(COUNT * 3);
+    
+    for (let i = 0; i < COUNT; i++) {
+      const r = Math.pow(Math.random(), 1.4) * 1300;
+      const th = Math.random() * Math.PI * 2;
+      const ySpread = r < 200 ? r * 0.55 : Math.max(15, r * 0.22);
+      const yOff = (Math.random() - 0.5) * ySpread * 2;
+      
+      pos[i * 3]     = Math.cos(th) * r;
+      pos[i * 3 + 1] = yOff;
+      pos[i * 3 + 2] = Math.sin(th) * r;
+      
+      const roll = Math.random();
+      if (roll < 0.45) {
+        col[i * 3] = 1.0; col[i * 3 + 1] = 0.90; col[i * 3 + 2] = 0.72;
+      } else if (roll < 0.8) {
+        col[i * 3] = 1.0; col[i * 3 + 1] = 0.72; col[i * 3 + 2] = 0.35;
+      } else {
+        col[i * 3] = 1.0; col[i * 3 + 1] = 0.52; col[i * 3 + 2] = 0.18;
+      }
+    }
+    return { pos, col, count: COUNT };
+  }, []);
+
+  const coreTex = useMemo(() => {
+    const c = document.createElement('canvas'); c.width = c.height = 64;
+    const ctx = c.getContext('2d')!;
+    const g = ctx.createRadialGradient(32,32,0, 32,32,32);
+    g.addColorStop(0,   'rgba(255,255,255,1.0)');
+    g.addColorStop(0.3, 'rgba(255,225,170,0.52)');
+    g.addColorStop(0.7, 'rgba(255,170,70,0.15)');
+    g.addColorStop(1,   'rgba(0,0,0,0)');
+    ctx.fillStyle = g; ctx.fillRect(0,0,64,64);
+    const tex = new THREE.CanvasTexture(c);
+    tex.colorSpace = THREE.SRGBColorSpace;
+    return tex;
+  }, []);
+
+  useFrame(() => {
+    if (pointsRef.current) {
+      (pointsRef.current.material as THREE.PointsMaterial).opacity = opacityRef.current * 1.25;
+    }
+  });
+
+  return (
+    <points ref={pointsRef}>
+      <bufferGeometry>
+        <bufferAttribute attach="attributes-position" args={[pos, 3]} count={count} array={pos} itemSize={3} />
+        <bufferAttribute attach="attributes-color"    args={[col, 3]} count={count} array={col} itemSize={3} />
+      </bufferGeometry>
+      <pointsMaterial 
+        size={85} 
+        vertexColors 
+        transparent 
+        blending={THREE.AdditiveBlending} 
+        sizeAttenuation 
+        depthWrite={false} 
+        map={coreTex} 
+        alphaTest={0.001} 
+      />
+    </points>
+  );
+}
+
 function DeepSpaceLayers() {
   // Refs
   const arm1Ref   = useRef<THREE.Points>(null!);
@@ -1010,6 +1696,14 @@ function DeepSpaceLayers() {
   const groupRef  = useRef<THREE.Group>(null!);
   const bulgeRef  = useRef<THREE.Sprite>(null!);
   const outerRef  = useRef<THREE.Sprite>(null!);
+
+  // Volumetric Core Sphere material refs
+  const coreSphereRef1 = useRef<THREE.MeshBasicMaterial>(null!);
+  const coreSphereRef2 = useRef<THREE.MeshBasicMaterial>(null!);
+  const coreSphereRef3 = useRef<THREE.MeshBasicMaterial>(null!);
+  const gasOpRef = useRef<number>(0);
+
+
 
   // ── Soft star particle texture ──────────────────────────────────────────
   const starTex = useMemo(() => {
@@ -1123,27 +1817,29 @@ function DeepSpaceLayers() {
         attempts++;
         const t     = Math.pow(Math.random(), 1.1);
         const wind  = t * Math.PI * 3.4;
-        const theta = baseAngle + wind;
+        
+        // Add natural swirling noise/angular dispersion
+        const theta = baseAngle + wind + (Math.random() - 0.5) * (0.32 + (1 - t) * 0.25);
         const r     = 180 + t * 5600;
 
-        // CHANGE 4: Skip particles in inter-arm voids with 65% probability
+        // Arm distance from nearest arm centerline
         const armDist = distToNearestArm(theta, r);
-        const armWidthThreshold = 320 + t * 900; // gets wider outward
+        const armWidthThreshold = 380 + t * 1100; // Wider outward
         if (armDist > armWidthThreshold && Math.random() < 0.65) continue;
 
-        // Arm width: narrow near core, flaring outward (CHANGE 3 partial)
-        const width  = 40 + t * 480;
-        const rOff   = (Math.random() - 0.5) * width * (0.3 + Math.random() * 0.7);
+        // Arm width: fluffy near core, beautifully flaring outward
+        const width  = 60 + t * 650;
+        const rOff   = (Math.random() - 0.5) * width * (0.4 + Math.random() * 0.6);
 
-        // CHANGE 3: Realistic 3D thickness (lens shape)
+        // Realistic 3D thickness (lens shape)
         let ySpread: number;
         const normR = r / 5780; // 0..1
         if (normR < 0.15) {
-          ySpread = r * 0.35;                     // bulge region: ±35% of r
+          ySpread = r * 0.35;                     // bulge region
         } else if (normR < 0.4) {
-          ySpread = 200 - (normR - 0.15) / 0.25 * 160; // taper 200→40
+          ySpread = 200 - (normR - 0.15) / 0.25 * 160;
         } else {
-          ySpread = 15 + Math.random() * 10;     // thin disc: ±15-25
+          ySpread = 15 + Math.random() * 10;
         }
         const yOff = (Math.random() - 0.5) * ySpread * 2;
 
@@ -1208,6 +1904,13 @@ function DeepSpaceLayers() {
 
     if (bulgeRef.current)  bulgeRef.current.material.opacity  = op * 0.45; // CHANGE 5
     if (outerRef.current)  outerRef.current.material.opacity  = op * 0.38;
+
+    // Volumetric 3D Core Sphere opacity controls
+    if (coreSphereRef1.current) coreSphereRef1.current.opacity = op * 0.75;
+    if (coreSphereRef2.current) coreSphereRef2.current.opacity = op * 0.40;
+    if (coreSphereRef3.current) coreSphereRef3.current.opacity = op * 0.18;
+    gasOpRef.current = op * 0.85;
+
     if (groupRef.current)  groupRef.current.rotation.y += 0.000018;
   });
 
@@ -1228,6 +1931,48 @@ function DeepSpaceLayers() {
       {/* Galaxy particles — realistic star colors, 3D thickness, dust lane gaps */}
       <group ref={groupRef} scale={[SC, SC, SC]}>
         <group rotation={[Math.PI * 0.07, 0.04, 0]}>
+
+          {/* Volumetric 3D Bulge Concentric Spheres (creates high-density cinematic depth) */}
+          <mesh position={[-2750, 0, 0]}>
+            <sphereGeometry args={[250, 32, 32]} />
+            <meshBasicMaterial 
+              ref={coreSphereRef1}
+              color="#FFE0B2" 
+              transparent={true} 
+              opacity={0} 
+              blending={THREE.AdditiveBlending} 
+              depthWrite={false} 
+            />
+          </mesh>
+          <mesh position={[-2750, 0, 0]}>
+            <sphereGeometry args={[500, 32, 32]} />
+            <meshBasicMaterial 
+              ref={coreSphereRef2}
+              color="#FFB74D" 
+              transparent={true} 
+              opacity={0} 
+              blending={THREE.AdditiveBlending} 
+              depthWrite={false} 
+            />
+          </mesh>
+          <mesh position={[-2750, 0, 0]}>
+            <sphereGeometry args={[850, 32, 32]} />
+            <meshBasicMaterial 
+              ref={coreSphereRef3}
+              color="#FF8A65" 
+              transparent={true} 
+              opacity={0} 
+              blending={THREE.AdditiveBlending} 
+              depthWrite={false} 
+            />
+          </mesh>
+
+          {/* 3D Volumetric Gas Clouds (pure particle density field tracing the arms) */}
+          <group position={[-2750, 0, 0]}>
+            <Volumetric3DGalaxyGas baseAngle={0} color="#ff9e40" opacityRef={gasOpRef} size={110} />
+            <Volumetric3DGalaxyGas baseAngle={Math.PI} color="#00bcd4" opacityRef={gasOpRef} size={110} />
+            <Volumetric3DCoreGas opacityRef={gasOpRef} />
+          </group>
 
           {/* Arm 1 — CHANGE 6: size=1.8, sizeAttenuation */}
           <points ref={arm1Ref}>
@@ -1315,6 +2060,12 @@ function DeepSpaceLayers() {
       {NEBULAE.map((n, i) => <VolumetricNebula key={i} {...n} />)}
       {CLUSTERS.map((c, i) => <StarCluster key={i} position={c.position} />)}
       <InterstellarBlackHole />
+      {DECORATIVE_BLACK_HOLES.map((dbh) => (
+        <DecorativeBlackHole key={dbh.id} {...dbh} />
+      ))}
+      {DEEP_BACKGROUND_GALAXIES.map((dbg) => (
+        <DeepBackgroundGalaxy key={dbg.id} {...dbg} />
+      ))}
       {DISTANT_GALAXIES.map((g, i) => <DistantGalaxySprite key={i} {...g} />)}
       {NAMED_GALAXIES.map((g, i) => <DistantGalaxySprite key={`named-${i}`} {...g} />)}
       {MILKY_WAY_COMPANIONS.map((g, i) => <DistantGalaxySprite key={`mwc-${i}`} {...g} />)}
@@ -1464,6 +2215,7 @@ function Planet({ name, orbit, radius, textureUrl, speed, rotationSpeed = 0.005,
       <OrbitPath radius={orbit} />
       <group 
         ref={groupRef}
+        name={name}
         onClick={handleFocus}
         onPointerOver={() => { setHovered(true); document.body.style.cursor = 'pointer'; }}
         onPointerOut={() => { setHovered(false); document.body.style.cursor = 'default'; }}
@@ -1879,10 +2631,16 @@ function TransmissionSpacecraft({ transmission, onComplete }: { transmission: an
         startPos
       );
     } else {
-      const targetX = Math.cos(planetTime) * orbit;
-      const targetZ = Math.sin(planetTime) * orbit;
-      const targetPos = new THREE.Vector3(targetX, 0, targetZ);
-      const midPos = new THREE.Vector3(targetX * 0.5, 20, targetZ * 0.5);
+      const targetPos = new THREE.Vector3();
+      const planetObj = state.scene.getObjectByName(transmission.targetPlanet);
+      if (planetObj) {
+        planetObj.getWorldPosition(targetPos);
+      } else {
+        const targetX = Math.cos(planetTime) * orbit;
+        const targetZ = Math.sin(planetTime) * orbit;
+        targetPos.set(targetX, 0, targetZ);
+      }
+      const midPos = new THREE.Vector3(targetPos.x * 0.5, 20, targetPos.z * 0.5);
       curve = new THREE.QuadraticBezierCurve3(startPos, midPos, targetPos);
     }
     
@@ -2157,6 +2915,7 @@ function DwarfPlanet({ name, orbit, radius, color = '#8a7a6a', speed, textureUrl
   return (
     <group>
       <group ref={groupRef}
+        name={name}
         onPointerOver={() => { setHovered(true); document.body.style.cursor = 'pointer'; }}
         onPointerOut={() => { setHovered(false); document.body.style.cursor = 'default'; }}
       >
@@ -2258,36 +3017,18 @@ function DoubleClickZoom() {
   return null;
 }
 
-// ─── RETURN BUTTON OVERLAY ──────────────────────────────────────────────────
-function ReturnButtonOverlay({ hide }: { hide?: boolean }) {
-  const cameraControls = useCamera();
-  const [visible, setVisible] = useState(false);
-  
+// ─── CAMERA DISTANCE TRACKER ────────────────────────────────────────────────
+function CameraDistanceTracker({ onChange }: { onChange: (visible: boolean) => void }) {
   useFrame(({ camera }) => {
     const dist = camera.position.length();
-    // Default camera distance is ~495 units; trigger return button only when zoomed out past 550 units
-    if (dist > 550 && !visible) setVisible(true);
-    else if (dist <= 550 && visible) setVisible(false);
+    onChange(dist > 550);
   });
-
-  if (!visible || hide) return null;
-
-  return (
-    <Html fullscreen className="pointer-events-none z-[100]">
-      <div className="absolute bottom-6 left-6 pointer-events-auto">
-        <button
-          onClick={() => cameraControls.current?.setLookAt(-320, 110, -360, 0, 0, 0, true)}
-          className="px-6 py-3 bg-[#050510]/60 backdrop-blur-xl border border-[#D4AF37]/50 text-[#D4AF37] text-xs font-bold uppercase tracking-widest rounded-full hover:bg-[#D4AF37] hover:text-black transition-all shadow-[0_0_15px_rgba(212,175,55,0.3)] font-orbitron whitespace-nowrap"
-        >
-          ⌂ Return to Solar System
-        </button>
-      </div>
-    </Html>
-  );
+  return null;
 }
 
 export default function SolarSystem({ hideReturnButton }: { hideReturnButton?: boolean }) {
   const cameraControlsRef = useRef<CameraControls>(null);
+  const [isZoomedOut, setIsZoomedOut] = useState(false);
 
   useEffect(() => {
     if (cameraControlsRef.current) {
@@ -2336,8 +3077,9 @@ export default function SolarSystem({ hideReturnButton }: { hideReturnButton?: b
 
           <Suspense fallback={null}>
             <SpaceBackground />
+            <Comets />
             <DeepSpaceLayers />
-            <ReturnButtonOverlay hide={hideReturnButton} />
+            <CameraDistanceTracker onChange={setIsZoomedOut} />
             
             <Sun unreadCount={unreadCount} />
             
@@ -2393,6 +3135,18 @@ export default function SolarSystem({ hideReturnButton }: { hideReturnButton?: b
             <Vignette eskil={false} offset={0.1} darkness={0.6} />
           </EffectComposer>
         </Canvas>
+
+        {/* Viewport-steady Return Button Overlay */}
+        {isZoomedOut && !hideReturnButton && (
+          <div className="absolute bottom-6 left-6 z-[100] pointer-events-auto">
+            <button
+              onClick={() => cameraControlsRef.current?.setLookAt(-320, 110, -360, 0, 0, 0, true)}
+              className="px-6 py-3 bg-[#050510]/60 backdrop-blur-xl border border-[#D4AF37]/50 text-[#D4AF37] text-xs font-bold uppercase tracking-widest rounded-full hover:bg-[#D4AF37] hover:text-black transition-all shadow-[0_0_15px_rgba(212,175,55,0.3)] font-orbitron whitespace-nowrap"
+            >
+              ⌂ Return to Solar System
+            </button>
+          </div>
+        )}
       </div>
     </CameraContext.Provider>
   );
