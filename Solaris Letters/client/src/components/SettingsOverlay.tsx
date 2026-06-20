@@ -5,6 +5,8 @@ import { useAppStore } from '../store/useAppStore';
 import { api } from '../lib/api';
 import { supabase } from '../lib/supabase';
 
+const API_BASE = (import.meta.env.VITE_API_URL ?? '').replace(/\/$/, '');
+
 const CUTE_DOODLES = [
   { 
     id: 'astronaut', 
@@ -84,7 +86,7 @@ export default function SettingsOverlay({ isOpen, onClose }: SettingsOverlayProp
       try {
         const token = localStorage.getItem('cosmimail_token');
         if (token) {
-          const res = await fetch('/api/users/me', { headers: { Authorization: `Bearer ${token}` } });
+          const res = await fetch(`${API_BASE}/api/users/me`, { headers: { Authorization: `Bearer ${token}` } });
           if (res.ok) {
             const { user: bu } = await res.json();
             if (bu?.displayName || bu?.display_name) setDisplayName(bu.displayName || bu.display_name);

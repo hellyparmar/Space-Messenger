@@ -16,8 +16,14 @@ import { initScheduler } from './scheduler';
 
 const app        = express();
 const httpServer = http.createServer(app);
-const PORT       = Number(process.env.PORT) || 4000;
-const SECRET     = process.env.JWT_SECRET    || 'cosmimail_secret_key_xyz_2024';
+const PORT   = Number(process.env.PORT) || 4000;
+const SECRET = process.env.JWT_SECRET    || 'cosmimail_secret_key_xyz_2024';
+
+// Allow comma-separated origins via CORS_ORIGIN env var
+// e.g. "https://your-app.netlify.app,http://localhost:5173"
+const ALLOWED_ORIGINS = (process.env.CORS_ORIGIN || 'http://localhost:5173,http://127.0.0.1:5173')
+  .split(',')
+  .map((o) => o.trim());
 
 // ── Socket.io ────────────────────────────────────────────────────────────────
 const io = new SocketServer(httpServer, {
@@ -49,7 +55,7 @@ initScheduler(io);
 
 // ── Middleware ────────────────────────────────────────────────────────────────
 app.use(cors({
-  origin: ['http://localhost:5173', 'http://127.0.0.1:5173'],
+  origin: ALLOWED_ORIGINS,
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
   allowedHeaders: ['Content-Type', 'Authorization'],

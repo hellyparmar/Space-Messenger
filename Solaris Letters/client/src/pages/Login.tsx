@@ -5,6 +5,8 @@ import { useAppStore } from '../store/useAppStore';
 import { supabase } from '../lib/supabase';
 import StarfieldBackground from '../components/StarfieldBackground';
 
+const API_BASE = (import.meta.env.VITE_API_URL ?? '').replace(/\/$/, '');
+
 export default function LoginPage() {
   const [identifier, setIdentifier] = useState('');
   const [password, setPassword] = useState('');
@@ -28,7 +30,7 @@ export default function LoginPage() {
       if (signInError) throw signInError;
 
       // Fetch full user profile from our database
-      const profileRes = await fetch('/api/users/me', {
+      const profileRes = await fetch(`${API_BASE}/api/users/me`, {
         headers: { 'Authorization': `Bearer ${data.session.access_token}` }
       });
 
@@ -38,7 +40,7 @@ export default function LoginPage() {
         userProfile = profileData.user;
       } else if (profileRes.status === 404) {
         // If the profile does not exist in the public schema, trigger an automatic sync!
-        const syncRes = await fetch('/api/users/sync', {
+        const syncRes = await fetch(`${API_BASE}/api/users/sync`, {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',

@@ -6,6 +6,8 @@ import { api } from '../lib/api';
 import { supabase } from '../lib/supabase';
 import StarfieldBackground from '../components/StarfieldBackground';
 
+const API_BASE = (import.meta.env.VITE_API_URL ?? '').replace(/\/$/, '');
+
 export default function RegisterPage() {
   const [formData, setFormData] = useState({
     username: '',
@@ -102,7 +104,7 @@ export default function RegisterPage() {
       if (!data.session) throw new Error('No session returned — check email confirmation is disabled in Supabase');
 
       // 2. Sync to our database
-      const syncRes = await fetch('/api/users/sync', {
+      const syncRes = await fetch(`${API_BASE}/api/users/sync`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',

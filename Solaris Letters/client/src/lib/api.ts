@@ -1,7 +1,10 @@
-// Relative paths — proxied by Vite to http://localhost:3000
+// In dev: BASE_URL is '' so Vite proxy handles /api/* → localhost:4000
+// In production: BASE_URL is the full Render backend URL (VITE_API_URL)
 // NEVER sends Authorization header on /auth/ routes
 
 import { supabase } from './supabase';
+
+const BASE_URL = (import.meta.env.VITE_API_URL ?? '').replace(/\/$/, '');
 
 const request = async <T>(path: string, options: RequestInit = {}): Promise<T> => {
   const headers: Record<string, string> = {
@@ -20,7 +23,7 @@ const request = async <T>(path: string, options: RequestInit = {}): Promise<T> =
     }
   }
 
-  const res = await fetch(path, { ...options, headers });
+  const res = await fetch(`${BASE_URL}${path}`, { ...options, headers });
 
   if (!res.ok) {
     const body = await res.json().catch(() => ({ message: res.statusText }));
