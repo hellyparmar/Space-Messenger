@@ -4,7 +4,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import SolarSystem from '../three/SolarSystem';
 import { useAppStore } from '../store/useAppStore';
 import { api } from '../lib/api';
-import { getSocket, connectSocket, disconnectSocket } from '../lib/socket';
+import { connectSocket, disconnectSocket } from '../lib/socket';
 import { supabase } from '../lib/supabase';
 import LetterComposer from '../components/LetterComposer';
 import LetterInbox from '../components/LetterInbox';
@@ -19,7 +19,7 @@ export default function HomePage() {
   const {
     user, token, unreadCount, setLetters, addLetter,
     isComposerOpen, setComposerOpen, isInboxOpen, setInboxOpen,
-    isBlackholeOpen, setBlackholeOpen,
+    isBlackholeOpen, setBlackholeOpen, setInboxFriendFilter,
   } = useAppStore();
 
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
@@ -59,6 +59,8 @@ export default function HomePage() {
 
     fetchL();
     fetchRequestsCount();
+    // Fetch friends/assignments on mount so PlanetDetails always has data
+    useAppStore.getState().fetchFriends();
     
     const interval = setInterval(() => {
       fetchL();
@@ -82,6 +84,9 @@ export default function HomePage() {
         const raw = localStorage.getItem('cosmimail_user');
         if (raw) {
           const parsed = JSON.parse(raw);
+          enriched.id = parsed.id || parsed.userId || enriched.id;
+          enriched.userId = parsed.userId || parsed.id || enriched.userId;
+          enriched.email = parsed.email || enriched.email;
           enriched.displayName = parsed.displayName || parsed.display_name || parsed.user_metadata?.display_name || parsed.user_metadata?.displayName || enriched.displayName || '';
           enriched.username = parsed.username || parsed.cosmic_id || parsed.user_metadata?.username || enriched.username || '';
         }
@@ -90,10 +95,15 @@ export default function HomePage() {
       // Layer 2: Supabase session
       try {
         const { data: { user: supaUser } } = await supabase.auth.getUser();
-        if (supaUser?.user_metadata) {
-          const meta = supaUser.user_metadata;
-          if (meta.display_name || meta.displayName) enriched.displayName = meta.display_name || meta.displayName;
-          if (meta.username) enriched.username = meta.username;
+        if (supaUser) {
+          enriched.id = supaUser.id || enriched.id;
+          enriched.userId = supaUser.id || enriched.userId;
+          enriched.email = supaUser.email || enriched.email;
+          if (supaUser.user_metadata) {
+            const meta = supaUser.user_metadata;
+            if (meta.display_name || meta.displayName) enriched.displayName = meta.display_name || meta.displayName;
+            if (meta.username) enriched.username = meta.username;
+          }
         }
       } catch {}
 
@@ -102,6 +112,8 @@ export default function HomePage() {
         try {
           const res = await api.get<any>('/api/users/me');
           if (res.user) {
+            enriched.id = res.user.id || enriched.id;
+            enriched.userId = res.user.id || enriched.userId;
             if (res.user.displayName || res.user.display_name) enriched.displayName = res.user.displayName || res.user.display_name;
             if (res.user.username || res.user.cosmic_id) enriched.username = res.user.username || res.user.cosmic_id;
             enriched.bio = res.user.bio || '';
@@ -198,7 +210,7 @@ export default function HomePage() {
                 {/* Search */}
                 <button
                   onClick={() => setIsSearchOpen(true)}
-                  style={{ display: 'flex', alignItems: 'center', gap: 7, padding: '7px 16px', background: 'rgba(200,160,80,0.06)', border: '1px solid rgba(180,140,80,0.2)', color: 'var(--text-primary)', cursor: 'pointer', borderRadius: 2, fontFamily: "'Exo 2', sans-serif", fontSize: 13, transition: 'border-color 0.2s, color 0.2s' }}
+                  style={{ height: 32, display: 'flex', alignItems: 'center', gap: 7, padding: '0 16px', background: 'rgba(200,160,80,0.06)', border: '1px solid rgba(180,140,80,0.2)', color: 'var(--text-primary)', cursor: 'pointer', borderRadius: 2, fontFamily: "'Exo 2', sans-serif", fontSize: 13, transition: 'border-color 0.2s, color 0.2s' }}
                   onMouseEnter={e => { (e.currentTarget as HTMLButtonElement).style.borderColor = 'var(--accent-gold)'; (e.currentTarget as HTMLButtonElement).style.color = 'var(--accent-gold)'; }}
                   onMouseLeave={e => { (e.currentTarget as HTMLButtonElement).style.borderColor = 'rgba(180,140,80,0.2)'; (e.currentTarget as HTMLButtonElement).style.color = 'var(--text-primary)'; }}
                 >
@@ -209,7 +221,7 @@ export default function HomePage() {
                 {/* Requests */}
                 <button
                   onClick={() => setIsRequestsOpen(true)}
-                  style={{ position: 'relative', display: 'flex', alignItems: 'center', gap: 7, padding: '7px 16px', background: 'rgba(200,160,80,0.06)', border: '1px solid rgba(180,140,80,0.2)', color: 'var(--text-primary)', cursor: 'pointer', borderRadius: 2, fontFamily: "'Exo 2', sans-serif", fontSize: 13, transition: 'border-color 0.2s, color 0.2s' }}
+                  style={{ height: 32, position: 'relative', display: 'flex', alignItems: 'center', gap: 7, padding: '0 16px', background: 'rgba(200,160,80,0.06)', border: '1px solid rgba(180,140,80,0.2)', color: 'var(--text-primary)', cursor: 'pointer', borderRadius: 2, fontFamily: "'Exo 2', sans-serif", fontSize: 13, transition: 'border-color 0.2s, color 0.2s' }}
                   onMouseEnter={e => { (e.currentTarget as HTMLButtonElement).style.borderColor = 'var(--accent-gold)'; (e.currentTarget as HTMLButtonElement).style.color = 'var(--accent-gold)'; }}
                   onMouseLeave={e => { (e.currentTarget as HTMLButtonElement).style.borderColor = 'rgba(180,140,80,0.2)'; (e.currentTarget as HTMLButtonElement).style.color = 'var(--text-primary)'; }}
                 >
@@ -270,7 +282,7 @@ export default function HomePage() {
 
                   <button
                     onClick={() => setInboxOpen(true)}
-                    style={{ position: 'relative', display: 'flex', alignItems: 'center', gap: 7, padding: '7px 16px', background: 'rgba(200,160,80,0.06)', border: '1px solid rgba(180,140,80,0.2)', color: 'var(--text-primary)', cursor: 'pointer', borderRadius: 2, fontFamily: "'Exo 2', sans-serif", fontSize: 13, transition: 'border-color 0.2s, color 0.2s' }}
+                    style={{ height: 32, position: 'relative', display: 'flex', alignItems: 'center', gap: 7, padding: '0 16px', background: 'rgba(200,160,80,0.06)', border: '1px solid rgba(180,140,80,0.2)', color: 'var(--text-primary)', cursor: 'pointer', borderRadius: 2, fontFamily: "'Exo 2', sans-serif", fontSize: 13, transition: 'border-color 0.2s, color 0.2s' }}
                     onMouseEnter={e => { (e.currentTarget as HTMLButtonElement).style.borderColor = 'var(--accent-gold)'; (e.currentTarget as HTMLButtonElement).style.color = 'var(--accent-gold)'; }}
                     onMouseLeave={e => { (e.currentTarget as HTMLButtonElement).style.borderColor = 'rgba(180,140,80,0.2)'; (e.currentTarget as HTMLButtonElement).style.color = 'var(--text-primary)'; }}
                   >
@@ -290,11 +302,11 @@ export default function HomePage() {
                 {/* Settings / User */}
                 <button
                   onClick={() => setIsSettingsOpen(true)}
-                  style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '6px 14px 6px 8px', background: 'rgba(200,160,80,0.06)', border: '1px solid rgba(180,140,80,0.2)', color: 'var(--text-primary)', cursor: 'pointer', borderRadius: 2, transition: 'border-color 0.2s' }}
+                  style={{ height: 32, display: 'flex', alignItems: 'center', gap: 8, padding: '0 12px 0 6px', background: 'rgba(200,160,80,0.06)', border: '1px solid rgba(180,140,80,0.2)', color: 'var(--text-primary)', cursor: 'pointer', borderRadius: 2, transition: 'border-color 0.2s' }}
                   onMouseEnter={e => { (e.currentTarget as HTMLButtonElement).style.borderColor = 'var(--accent-gold)'; }}
                   onMouseLeave={e => { (e.currentTarget as HTMLButtonElement).style.borderColor = 'rgba(180,140,80,0.2)'; }}
                 >
-                  <div style={{ width: 26, height: 26, borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center', fontFamily: 'Orbitron, sans-serif', fontWeight: 700, fontSize: 10, color: '#F0E8D8', background: `conic-gradient(from 0deg, hsl(${navAvatarHue},35%,22%), hsl(${(navAvatarHue + 60) % 360},30%,28%))`, border: '1px solid rgba(180,140,80,0.3)', flexShrink: 0 }}>
+                  <div style={{ width: 20, height: 20, borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center', fontFamily: 'Orbitron, sans-serif', fontWeight: 700, fontSize: 8, color: '#F0E8D8', background: `conic-gradient(from 0deg, hsl(${navAvatarHue},35%,22%), hsl(${(navAvatarHue + 60) % 360},30%,28%))`, border: '1px solid rgba(180,140,80,0.3)', flexShrink: 0 }}>
                     {(user.displayName?.[0] || user.username?.[0] || 'U').toUpperCase()}
                   </div>
                   <span style={{ fontFamily: "'Exo 2', sans-serif", fontSize: 13 }}>{user.displayName || user.username || 'Traveler'}</span>
@@ -307,7 +319,7 @@ export default function HomePage() {
       </AnimatePresence>
 
       <LetterComposer isOpen={isComposerOpen} onClose={() => setComposerOpen(false)} />
-      <LetterInbox isOpen={isInboxOpen} onClose={() => setInboxOpen(false)} onCompose={() => { setInboxOpen(false); setComposerOpen(true); }} />
+      <LetterInbox isOpen={isInboxOpen} onClose={() => { setInboxFriendFilter(null); setInboxOpen(false); }} onCompose={() => { setInboxOpen(false); setComposerOpen(true); }} />
       <PlanetDetails onCompose={() => setComposerOpen(true)} />
       <GroupChat />
       <SettingsOverlay isOpen={isSettingsOpen} onClose={() => setIsSettingsOpen(false)} />

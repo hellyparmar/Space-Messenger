@@ -1,8 +1,7 @@
-import { useState, useEffect } from 'react';
+import { useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useAppStore } from '../store/useAppStore';
 import { api } from '../lib/api';
-import { PlanetPickerModal } from './PlanetPickerModal';
 import { STICKERS, PAPER_STYLES } from '../lib/letterStyles';
 
 interface LetterInboxProps {
@@ -24,7 +23,7 @@ function formatDate(dateStr: string) {
 }
 
 export default function LetterInbox({ isOpen, onClose, onCompose }: LetterInboxProps) {
-  const { letters, markRead, assignments, setComposerRecipient, fetchFriends, user } = useAppStore();
+  const { letters, markRead, assignments, setComposerRecipient, user, inboxFriendFilter, setInboxFriendFilter } = useAppStore();
   const [tab, setTab] = useState<'received' | 'sent'>('received');
   const [expanded, setExpanded] = useState<string | null>(null);
   // Future-self: senderId === receiverId === user.id → appears in BOTH tabs (when delivered)
@@ -34,7 +33,16 @@ export default function LetterInbox({ isOpen, onClose, onCompose }: LetterInboxP
   const receivedLetters = letters.filter(l => (l.senderId !== user?.id || isFutureSelf(l)) && !l.isPending);
   // Sent: letters sent BY me (including future-self letters and future-scheduled letters, showing compose time)
   const sentLetters     = letters.filter(l => l.senderId === user?.id);
-  const activeLetters   = tab === 'received' ? receivedLetters : sentLetters;
+
+  // If a friend filter is active, narrow down to only the conversation with that friend
+  const applyFriendFilter = (list: typeof letters) => {
+    if (!inboxFriendFilter) return list;
+    return list.filter(l =>
+      l.senderId === inboxFriendFilter || l.receiverId === inboxFriendFilter
+    );
+  };
+
+  const activeLetters   = applyFriendFilter(tab === 'received' ? receivedLetters : sentLetters);
 
   const expandedLetter = letters.find(l => l.id === expanded);
 
@@ -106,8 +114,28 @@ export default function LetterInbox({ isOpen, onClose, onCompose }: LetterInboxP
                 <div>
                   <h2 style={{ fontFamily: 'Orbitron, sans-serif', color: 'var(--accent-gold)', fontSize: 16, letterSpacing: 4, fontWeight: 700, margin: 0 }}>COSMIC INBOX</h2>
                   <p style={{ color: 'var(--text-dim)', fontSize: 10, letterSpacing: 3, margin: '4px 0 0', textTransform: 'uppercase' }}>
-                    {unreadCount > 0 ? `${unreadCount} unread transmissions` : 'All transmissions read'}
+                    {inboxFriendFilter
+                      ? (() => {
+                          const a = assignments.find(a => { const f = a.friend as any; return f?.id === inboxFriendFilter || f?.userId === inboxFriendFilter; });
+                          const name = a ? ((a.friend as any)?.displayName || (a.friend as any)?.username || 'Friend') : 'Friend';
+                          return `Conversation with ${name}`;
+                        })()
+                      : unreadCount > 0 ? `${unreadCount} unread transmissions` : 'All transmissions read'
+                    }
                   </p>
+                  {inboxFriendFilter && (
+                    <button
+                      onClick={() => setInboxFriendFilter(null)}
+                      style={{
+                        marginTop: 6, background: 'none', border: 'none', padding: 0,
+                        color: 'var(--accent-gold)', fontSize: 9, letterSpacing: 2,
+                        textTransform: 'uppercase', cursor: 'pointer', opacity: 0.7,
+                        fontFamily: 'Orbitron, sans-serif',
+                      }}
+                    >
+                      ← View all letters
+                    </button>
+                  )}
                 </div>
                 <button
                   title="Close"
@@ -217,9 +245,9 @@ export default function LetterInbox({ isOpen, onClose, onCompose }: LetterInboxP
                           </span>
                           <span style={{ color: 'var(--text-dim)', fontSize: 10, letterSpacing: 1, flexShrink: 0, marginLeft: 8, fontFamily: 'monospace' }}>
                             {letter.isPending
-                              ? `Due: ${formatDate(letter.scheduledAt)}`
+                              ? (letter.scheduledAt ? `Due: ${formatDate(letter.scheduledAt)}` : 'Scheduled')
                               : (tab === 'received' && isFutureSelf(letter))
-                                ? formatDate(letter.scheduledAt || letter.createdAt)   // show delivery time
+                                ? formatDate(letter.scheduledAt ?? letter.createdAt)   // show delivery time
                                 : formatDate(letter.createdAt)                          // show compose time
                             }
                           </span>
@@ -371,7 +399,17 @@ export default function LetterInbox({ isOpen, onClose, onCompose }: LetterInboxP
                       {onCompose && (
                         <button
                           onClick={() => {
-                            setComposerRecipient({ id: expandedLetter.senderId, displayName: sender.displayName, username: sender.username, planetName: sender.planet || 'Unknown' });
+                            // Reply to the OTHER party: if current user sent it, reply to receiver; otherwise reply to sender
+                            const replyToId = expandedLetter.senderId === user?.id
+                              ? expandedLetter.receiverId
+                              : expandedLetter.senderId;
+                            const replyToInfo = getSender(replyToId);
+                            setComposerRecipient({
+                              id: replyToId,
+                              displayName: replyToInfo.displayName,
+                              username: replyToInfo.username,
+                              planetName: replyToInfo.planet || 'Unknown'
+                            });
                             setExpanded(null); onClose(); onCompose();
                           }}
                           style={{
