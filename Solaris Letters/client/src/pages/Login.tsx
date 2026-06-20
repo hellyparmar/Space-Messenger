@@ -29,36 +29,48 @@ export default function LoginPage() {
 
       if (signInError) throw signInError;
 
-      // Fetch full user profile from our database
-      const profileRes = await fetch(`${API_BASE}/api/users/me`, {
-        headers: { 'Authorization': `Bearer ${data.session.access_token}` }
-      });
-
+      // Fetch full user profile from backend — wrapped in try/catch so a
+      // NetworkError (backend not yet deployed / server down) never blocks login.
       let userProfile = null;
-      if (profileRes.ok) {
-        const profileData = await profileRes.json();
-        userProfile = profileData.user;
-      } else if (profileRes.status === 404) {
-        // If the profile does not exist in the public schema, trigger an automatic sync!
-        const syncRes = await fetch(`${API_BASE}/api/users/sync`, {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'Authorization': `Bearer ${data.session.access_token}`
-          },
-          body: JSON.stringify({
-            display_name: data.user.user_metadata?.display_name || data.user.email?.split('@')[0],
-            cosmic_id: data.user.user_metadata?.username
-          })
+      try {
+        const profileRes = await fetch(`${API_BASE}/api/users/me`, {
+          headers: { 'Authorization': `Bearer ${data.session.access_token}` }
         });
-        if (syncRes.ok) {
-          const syncData = await syncRes.json();
-          userProfile = syncData.user;
+
+        if (profileRes.ok) {
+          const profileData = await profileRes.json();
+          userProfile = profileData.user;
+        } else if (profileRes.status === 404) {
+          // Profile missing — auto-sync from Supabase metadata
+          const syncRes = await fetch(`${API_BASE}/api/users/sync`, {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              'Authorization': `Bearer ${data.session.access_token}`
+            },
+            body: JSON.stringify({
+              display_name: data.user.user_metadata?.display_name || data.user.email?.split('@')[0],
+              cosmic_id: data.user.user_metadata?.username
+            })
+          });
+          if (syncRes.ok) {
+            const syncData = await syncRes.json();
+            userProfile = syncData.user;
+          }
         }
+      } catch {
+        // Backend unreachable — fall back to Supabase identity (app still works)
+        console.warn('Backend unavailable, using Supabase profile fallback');
       }
 
+      // Always fall back to Supabase user data if backend profile is missing
       if (!userProfile) {
-        userProfile = { id: data.user.id, email: data.user.email };
+        userProfile = {
+          id: data.user.id,
+          email: data.user.email,
+          displayName: data.user.user_metadata?.display_name || data.user.email?.split('@')[0],
+          username: data.user.user_metadata?.username || data.user.email?.split('@')[0],
+        };
       }
 
       setToken(data.session.access_token);
