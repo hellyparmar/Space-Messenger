@@ -2,7 +2,7 @@
   # Solaris Letters React client
   base    = "Solaris Letters/client"
   command = "npm run build"
-  publish = "dist"
+  publish = "Solaris Letters/client/dist"
 
 # SPA redirect — all client-side routes serve index.html
 [[redirects]]
