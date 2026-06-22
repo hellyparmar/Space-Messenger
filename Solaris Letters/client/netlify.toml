@@ -2,6 +2,7 @@
   command = "npm run build"
   publish = "dist"
 
+# SPA redirect — all routes serve index.html (backup to public/_redirects)
 [[redirects]]
   from = "/*"
   to = "/index.html"
