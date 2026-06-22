@@ -5,6 +5,8 @@ import HomePage from './pages/HomePage';
 import LoginPage from './pages/Login';
 import RegisterPage from './pages/Register';
 
+import LandingPage from './pages/LandingPage';
+
 function ProtectedRoute({ children }: { children: React.ReactNode }) {
   const token = localStorage.getItem('cosmimail_token');
   if (!token) return <Navigate to="/login" replace />;
@@ -42,7 +44,7 @@ export default function App() {
     <BrowserRouter>
       <AuthListener />
       <Routes>
-        <Route path="/" element={<Navigate to="/home" replace />} />
+        <Route path="/" element={<LandingPage />} />
         <Route path="/login" element={
           <PublicRoute>
             <LoginPage />

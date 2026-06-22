@@ -234,7 +234,7 @@ export default function LetterComposer({ isOpen, onClose }: { isOpen: boolean; o
                 onClick={() => setSciFiMode(!sciFiMode)}
                 className={`px-3 py-1.5 rounded border text-xs font-bold uppercase tracking-wider font-orbitron transition-all whitespace-nowrap ${sciFiMode ? 'bg-[#00ffcc]/20 border-[#00ffcc] text-[#00ffcc] shadow-[0_0_15px_rgba(0,255,204,0.4)]' : 'bg-transparent border-white/20 text-white/50 hover:text-white/80'}`}
               >
-                {sciFiMode ? '⚡ SCI-FI: ON' : '⚡ SCI-FI: OFF'}
+                {sciFiMode ? 'SCI-FI: ON' : 'SCI-FI: OFF'}
               </button>
             </div>
           </div>
@@ -462,11 +462,11 @@ export default function LetterComposer({ isOpen, onClose }: { isOpen: boolean; o
                       style={{ filter: 'hue-rotate(240deg)' }}
                       className="w-4 h-4 rounded border-white/20 bg-[#050510] text-[#8a5aff] focus:ring-0 cursor-pointer accent-[#8a5aff]"
                     />
-                    <span>⏰ Schedule transmission for future delivery</span>
+                    <span>Schedule transmission for future delivery</span>
                   </label>
                 ) : (
                   <div className="text-[10px] font-mono text-[#a0b9ff]/60 uppercase tracking-widest flex items-center gap-2">
-                    <span>⏰ MANDATORY FUTURE DELIVERY (LETTER TO PAST/FUTURE SELF)</span>
+                    <span>MANDATORY FUTURE DELIVERY (LETTER TO PAST/FUTURE SELF)</span>
                   </div>
                 )}
 

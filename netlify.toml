@@ -1,5 +1,5 @@
 [build]
-  # Tell Netlify the app lives in this subdirectory
+  # Solaris Letters React client
   base    = "Solaris Letters/client"
   command = "npm run build"
   publish = "dist"

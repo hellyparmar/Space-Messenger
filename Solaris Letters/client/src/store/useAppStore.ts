@@ -21,6 +21,8 @@ interface Letter {
   createdAt: string;
   paperSkin?: string;
   stickers?: any[];
+  isFutureSelf?: boolean;
+  isPending?: boolean;
 }
 
 interface Transmission {
@@ -64,6 +66,7 @@ interface AppState {
   selectedPlanet: string | null;
   activeTransmissions: Transmission[];
   isInboxOpen: boolean;
+  inboxFriendFilter: string | null;
   isComposerOpen: boolean;
   composerRecipient: ComposerRecipient | null;
   friends: Friend[];
@@ -78,6 +81,7 @@ interface AppState {
   markRead: (id: string) => void;
   setSelectedPlanet: (name: string | null) => void;
   setInboxOpen: (open: boolean) => void;
+  setInboxFriendFilter: (friendId: string | null) => void;
   setComposerOpen: (open: boolean) => void;
   setComposerRecipient: (recipient: ComposerRecipient | null) => void;
   addTransmission: (targetPlanet: string, data: Record<string, unknown>) => void;
@@ -108,6 +112,7 @@ export const useAppStore = create<AppState>((set) => {
     unreadCount: 0,
     selectedPlanet: null,
     isInboxOpen: false,
+    inboxFriendFilter: null,
     isComposerOpen: false,
     composerRecipient: null,
     activeTransmissions: [],
@@ -128,13 +133,13 @@ export const useAppStore = create<AppState>((set) => {
     setLetters: (letters) =>
       set((s) => {
         const userId = s.user?.id;
-        const unreadCount = letters.filter((l: any) => l.senderId !== userId && !l.isRead && !l.isPending).length;
+        const unreadCount = letters.filter((l) => (l.senderId !== userId || l.receiverId === userId) && !l.isRead && !l.isPending).length;
         return { letters, unreadCount };
       }),
     addLetter: (letter) =>
       set((s) => {
         const userId = s.user?.id;
-        const isReceivedUnread = letter.senderId !== userId && !letter.isRead && !letter.isPending;
+        const isReceivedUnread = (letter.senderId !== userId || letter.receiverId === userId) && !letter.isRead && !letter.isPending;
         return {
           letters: [letter, ...s.letters],
           unreadCount: s.unreadCount + (isReceivedUnread ? 1 : 0),
@@ -147,6 +152,7 @@ export const useAppStore = create<AppState>((set) => {
       })),
     setSelectedPlanet: (name) => set({ selectedPlanet: name }),
     setInboxOpen: (open) => set({ isInboxOpen: open }),
+    setInboxFriendFilter: (friendId) => set({ inboxFriendFilter: friendId }),
     setComposerOpen: (open) => set({ isComposerOpen: open }),
     addTransmission: (targetPlanet, data) =>
       set((s) => ({
@@ -196,6 +202,7 @@ export const useAppStore = create<AppState>((set) => {
         friends: [],
         assignments: [],
         isInboxOpen: false,
+        inboxFriendFilter: null,
         isComposerOpen: false,
       });
     },
