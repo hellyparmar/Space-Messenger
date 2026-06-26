@@ -1,46 +1,11 @@
-/* eslint-disable react/forbid-dom-props, react/forbid-component-props */
 import { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useAppStore } from '../store/useAppStore';
 import { api } from '../lib/api';
 import { supabase } from '../lib/supabase';
+import { CUTE_DOODLES } from '../lib/avatars';
 
 const API_BASE = (import.meta.env.VITE_API_URL ?? '').replace(/\/$/, '');
-
-const CUTE_DOODLES = [
-  { 
-    id: 'astronaut', 
-    svg: <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><path d="M12 2c-4.4 0-8 3.6-8 8v4c0 2.2 1.8 4 4 4h8c2.2 0 4-1.8 4-4v-4c0-4.4-3.6-8-8-8z"/><rect x="7" y="7" width="10" height="7" rx="2"/><path d="M8 18v2M16 18v2M4 10H2M22 10h-2M12 22a2 2 0 1 0 0-4 2 2 0 0 0 0 4z"/><path d="M9 10a2 2 0 1 1 6 0"/></svg>
-  },
-  { 
-    id: 'saturn', 
-    svg: <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="5"/><ellipse cx="12" cy="12" rx="11" ry="3" transform="rotate(-20 12 12)"/><path d="M9 10a4 4 0 0 0 6 0" strokeDasharray="1 2"/><circle cx="3" cy="17" r="1" fill="currentColor"/><circle cx="21" cy="7" r="0.5" fill="currentColor"/></svg>
-  },
-  { 
-    id: 'ufo', 
-    svg: <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><path d="M12 3a4 4 0 0 0-4 4v2h8V7a4 4 0 0 0-4-4z"/><ellipse cx="12" cy="10" rx="9" ry="3"/><path d="M8 12l-2 5a9 9 0 0 0 12 0l-2-5" strokeDasharray="2 2"/><circle cx="8" cy="10" r="0.5" fill="currentColor"/><circle cx="12" cy="10.5" r="0.5" fill="currentColor"/><circle cx="16" cy="10" r="0.5" fill="currentColor"/></svg>
-  },
-  { 
-    id: 'satellite', 
-    svg: <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><rect x="2" y="8" width="5" height="8" rx="1"/><rect x="17" y="8" width="5" height="8" rx="1"/><path d="M7 12h3M14 12h3M10 10h4v4h-4z"/><path d="M12 10V4M9.5 6.5A3.5 3.5 0 0 1 14.5 6.5M11 5a1.5 1.5 0 0 1 2 0"/><circle cx="12" cy="12" r="0.5" fill="currentColor"/></svg>
-  },
-  { 
-    id: 'telescope', 
-    svg: <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><path d="M14 5l4 4-8 8-4-4 8-8z"/><path d="M18 9l2 2M6 13l-2-2"/><path d="M10 14l-2 6M12 12l2 8"/><path d="M8 20h6M19 4a2 2 0 1 1-2.83 2.83"/><circle cx="13" cy="10" r="0.5" fill="currentColor"/></svg>
-  },
-  { 
-    id: 'galaxy', 
-    svg: <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><path d="M12 12c-2.76 0-5 2.24-5 5s5 2 5-3c0-3.3-3.7-6-6.5-4s-3.5 5.5-1 7c2 1 4.5.5 5.5-1.5"/><path d="M12 12c2.76 0 5-2.24 5-5s-5-2-5 3c0 3.3 3.7 6 6.5 4s3.5-5.5 1-7c-2-1-4.5-.5-5.5 1.5"/><circle cx="12" cy="12" r="1.5" fill="currentColor"/><circle cx="5" cy="5" r="0.5" fill="currentColor"/><circle cx="20" cy="19" r="0.5" fill="currentColor"/><circle cx="19" cy="6" r="0.5" fill="currentColor"/><circle cx="4" cy="18" r="0.5" fill="currentColor"/></svg>
-  },
-  { 
-    id: 'shuttle', 
-    svg: <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><path d="M12 2C10 5 9 8 9 12v6h6v-6c0-4-1-7-3-10z"/><path d="M9 14H4l1.5-4 3.5 1M15 14h5l-1.5-4-3.5 1"/><path d="M10 18l-1 4h6l-1-4"/><circle cx="12" cy="9" r="1"/><path d="M11 22v1M13 22v1"/></svg>
-  },
-  { 
-    id: 'meteor', 
-    svg: <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><circle cx="16" cy="16" r="5"/><path d="M12.5 12.5L3 3M17 11l-3-8M11 17l-8-3M7 7l3 3M5 10l3 3"/><circle cx="15" cy="15" r="1" fill="currentColor"/><circle cx="17.5" cy="17" r="0.5" fill="currentColor"/></svg>
-  }
-];
 
 interface SettingsOverlayProps {
   isOpen: boolean;
@@ -58,6 +23,8 @@ export default function SettingsOverlay({ isOpen, onClose }: SettingsOverlayProp
   const [isChoosingAvatar, setIsChoosingAvatar] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   const [toast, setToast] = useState<{ msg: string; ok: boolean } | null>(null);
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+  const [isDeleting, setIsDeleting] = useState(false);
 
   // Three-layer loading — no early returns
   useEffect(() => {
@@ -110,9 +77,21 @@ export default function SettingsOverlay({ isOpen, onClose }: SettingsOverlayProp
   };
 
   const handleSave = async () => {
+    if (cosmicIdChanges < 3 && user?.username !== username) {
+      if (username.length < 3 || username.length > 20) {
+        showToast('Cosmic ID must be between 3 and 20 characters.', false);
+        return;
+      }
+      const validFormat = /^[a-z0-9][a-z0-9_]{1,18}[a-z0-9]$/.test(username);
+      if (!validFormat) {
+        showToast('Cosmic ID must start/end with letters/numbers, and use lowercase, numbers, and underscores only.', false);
+        return;
+      }
+    }
+
     setIsSaving(true);
     try {
-      const r = await api.patch<{ user: Record<string, any> }>('/api/users/me', { 
+      const r = await api.patch<{ user: Record<string, unknown> }>('/api/users/me', { 
         display_name: displayName, 
         bio,
         cosmic_id: username,
@@ -121,18 +100,19 @@ export default function SettingsOverlay({ isOpen, onClose }: SettingsOverlayProp
       if (user) {
         setUser({ 
           ...user, 
-          username: r.user.cosmic_id || username,
-          displayName: r.user.display_name || displayName,
-          bio: r.user.bio || bio,
-          avatarIcon: r.user.avatar_icon || avatarIcon,
-          cosmicIdChanges: r.user.cosmic_id_changes || cosmicIdChanges
+          username: String(r.user.cosmic_id || username),
+          displayName: String(r.user.display_name || displayName),
+          bio: String(r.user.bio || bio),
+          avatarIcon: r.user.avatar_icon ? String(r.user.avatar_icon) : undefined,
+          cosmicIdChanges: typeof r.user.cosmic_id_changes === 'number' ? r.user.cosmic_id_changes : cosmicIdChanges
         });
       }
-      setUsername(r.user.cosmic_id || username);
-      setCosmicIdChanges(r.user.cosmic_id_changes || cosmicIdChanges);
+      setUsername(String(r.user.cosmic_id || username));
+      setCosmicIdChanges(typeof r.user.cosmic_id_changes === 'number' ? r.user.cosmic_id_changes : cosmicIdChanges);
       showToast('Transmission recorded', true);
-    } catch (err: any) {
-      showToast(err.message || 'Transmission failed', false);
+    } catch (err: unknown) {
+      const errMsg = err instanceof Error ? err.message : (typeof err === 'object' && err !== null && 'message' in err ? String((err as Record<string, unknown>).message) : 'Transmission failed');
+      showToast(errMsg, false);
     } finally {
       setIsSaving(false);
     }
@@ -147,6 +127,23 @@ export default function SettingsOverlay({ isOpen, onClose }: SettingsOverlayProp
     window.location.href = '/login';
   };
 
+  const handleDeleteAccount = async () => {
+    setIsDeleting(true);
+    try {
+      await api.delete('/api/users/me');
+      await supabase.auth.signOut();
+      localStorage.removeItem('cosmimail_token');
+      localStorage.removeItem('cosmimail_user');
+      logout();
+      onClose();
+      window.location.href = '/login';
+    } catch (err: unknown) {
+      const errMsg = err instanceof Error ? err.message : 'Failed to delete account';
+      showToast(errMsg, false);
+      setIsDeleting(false);
+    }
+  };
+
   return (
     <AnimatePresence>
       {isOpen && (
@@ -156,7 +153,7 @@ export default function SettingsOverlay({ isOpen, onClose }: SettingsOverlayProp
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
             onClick={onClose}
-            style={{ position: 'fixed', inset: 0, zIndex: 150, background: 'rgba(0,0,0,0.7)', backdropFilter: 'blur(4px)' }}
+            className="settings-backdrop-overlay"
           />
 
           <motion.div
@@ -164,27 +161,22 @@ export default function SettingsOverlay({ isOpen, onClose }: SettingsOverlayProp
             animate={{ x: 0 }}
             exit={{ x: '100%' }}
             transition={{ type: 'spring', damping: 30, stiffness: 250 }}
-            className="cosmic-card parchment-scroll"
-            style={{
-              position: 'fixed', top: 0, right: 0, height: '100%', width: 380,
-              zIndex: 151, display: 'flex', flexDirection: 'column', overflowX: 'hidden',
-              backdropFilter: 'blur(24px)',
-            }}
+            className="cosmic-card parchment-scroll settings-modal-container"
           >
             {/* Top accent rule */}
-            <div style={{ height: 1, background: 'linear-gradient(90deg, transparent, rgba(200,160,80,0.5), transparent)', flexShrink: 0 }} />
+            <div className="settings-top-rule" />
 
             {/* Header */}
-            <div style={{ padding: '32px 28px 20px', borderBottom: '1px solid rgba(180,140,80,0.15)', flexShrink: 0 }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+            <div className="settings-header">
+              <div className="settings-header-row">
                 <div>
-                  <h2 style={{ fontFamily: 'Orbitron, sans-serif', color: 'var(--accent-gold)', fontSize: 18, letterSpacing: 4, fontWeight: 700, margin: 0 }}>SETTINGS</h2>
-                  <p style={{ color: 'var(--text-dim)', fontSize: 10, letterSpacing: 6, margin: '4px 0 0', textTransform: 'uppercase' }}>MISSION CONTROL</p>
+                  <h2 className="settings-header-title">SETTINGS</h2>
+                  <p className="settings-header-subtitle">MISSION CONTROL</p>
                 </div>
                 <button
                   title="Close"
                   onClick={onClose}
-                  style={{ background: 'none', border: '1px solid rgba(180,140,80,0.25)', color: 'var(--text-dim)', cursor: 'pointer', width: 32, height: 32, display: 'flex', alignItems: 'center', justifyContent: 'center', borderRadius: 2 }}
+                  className="settings-close-btn"
                 >
                   <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M18 6L6 18M6 6l12 12"/></svg>
                 </button>
@@ -192,23 +184,14 @@ export default function SettingsOverlay({ isOpen, onClose }: SettingsOverlayProp
             </div>
 
             {/* Body */}
-            <div className="parchment-scroll" style={{ flex: 1, overflowY: 'auto', padding: '0 28px 28px' }}>
+            <div className="parchment-scroll settings-body">
               
               {/* Avatar */}
-              <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', padding: '28px 0 20px', position: 'relative' }}>
+              <div className="settings-avatar-section">
                 <div 
                   onClick={() => setIsChoosingAvatar(!isChoosingAvatar)}
-                  style={{
-                    width: 72, height: 72, borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center',
-                    fontFamily: 'Orbitron, sans-serif', fontSize: 28, fontWeight: 700, color: '#F0E8D8',
-                    background: `conic-gradient(from 180deg at 50% 50%, hsl(${hue},40%,20%), hsl(${hue + 60},35%,25%), hsl(${hue},40%,20%))`,
-                    border: '1px solid rgba(200,160,80,0.4)',
-                    boxShadow: '0 0 20px rgba(0,0,0,0.6)',
-                    marginBottom: 12, cursor: 'pointer',
-                    transition: 'transform 0.2s',
-                  }}
-                  onMouseEnter={e => e.currentTarget.style.transform = 'scale(1.05)'}
-                  onMouseLeave={e => e.currentTarget.style.transform = 'scale(1)'}
+                  className="settings-avatar-circle"
+                  style={{ ['--avatar-hue' as any]: hue }}
                 >
                   {avatarIcon ? CUTE_DOODLES.find(d => d.id === avatarIcon)?.svg || avatarLetter : avatarLetter}
                 </div>
@@ -219,20 +202,11 @@ export default function SettingsOverlay({ isOpen, onClose }: SettingsOverlayProp
                       initial={{ opacity: 0, y: -10 }}
                       animate={{ opacity: 1, y: 0 }}
                       exit={{ opacity: 0, y: -10 }}
-                      style={{
-                        position: 'absolute', top: 110, background: 'var(--bg-card)', 
-                        border: '1px solid rgba(180,140,80,0.25)', borderRadius: 4,
-                        padding: 12, display: 'flex', gap: 8, flexWrap: 'wrap', justifyContent: 'center',
-                        width: 220, zIndex: 10, boxShadow: '0 8px 32px rgba(0,0,0,0.8)'
-                      }}
+                      className="settings-avatar-dropdown"
                     >
                       <div 
                         onClick={() => { setAvatarIcon(null); setIsChoosingAvatar(false); }}
-                        style={{
-                          width: 40, height: 40, display: 'flex', alignItems: 'center', justifyContent: 'center',
-                          cursor: 'pointer', borderRadius: 4, background: !avatarIcon ? 'rgba(200,160,80,0.2)' : 'transparent',
-                          color: 'var(--accent-gold)', fontSize: 18, fontFamily: 'Orbitron, sans-serif'
-                        }}
+                        className={`settings-avatar-option initials ${!avatarIcon ? 'selected' : ''}`}
                       >
                         {avatarLetter}
                       </div>
@@ -240,11 +214,7 @@ export default function SettingsOverlay({ isOpen, onClose }: SettingsOverlayProp
                         <div
                           key={doodle.id}
                           onClick={() => { setAvatarIcon(doodle.id); setIsChoosingAvatar(false); }}
-                          style={{
-                            width: 40, height: 40, display: 'flex', alignItems: 'center', justifyContent: 'center',
-                            cursor: 'pointer', borderRadius: 4, background: avatarIcon === doodle.id ? 'rgba(200,160,80,0.2)' : 'transparent',
-                            color: 'var(--accent-gold)'
-                          }}
+                          className={`settings-avatar-option ${avatarIcon === doodle.id ? 'selected' : ''}`}
                         >
                           {doodle.svg}
                         </div>
@@ -253,18 +223,18 @@ export default function SettingsOverlay({ isOpen, onClose }: SettingsOverlayProp
                   )}
                 </AnimatePresence>
 
-                <p style={{ fontFamily: 'Orbitron, sans-serif', color: 'var(--text-primary)', fontSize: 14, fontWeight: 600, margin: 0 }}>{displayName || username || 'Unknown'}</p>
-                <p style={{ color: 'var(--accent-gold)', fontSize: 11, margin: '4px 0 0', fontFamily: "'Exo 2', sans-serif", opacity: 0.8 }}>@{username}</p>
+                <p className="settings-profile-name">{displayName || username || 'Unknown'}</p>
+                <p className="settings-profile-handle">@{username}</p>
               </div>
 
               {/* Divider */}
-              <div className="parchment-divider">
-                <span style={{ color: 'var(--text-dim)', fontSize: 9, letterSpacing: 3 }}>◆</span>
+              <div className="settings-divider">
+                <span>◆</span>
               </div>
 
               {/* Display Name */}
-              <div style={{ marginBottom: 20 }}>
-                <label style={{ display: 'block', fontFamily: 'Orbitron, sans-serif', color: 'var(--accent-gold)', fontSize: 9, letterSpacing: 4, textTransform: 'uppercase', marginBottom: 8 }}>
+              <div className="settings-field-group">
+                <label className="settings-field-label">
                   Display Name
                 </label>
                 <input
@@ -278,43 +248,28 @@ export default function SettingsOverlay({ isOpen, onClose }: SettingsOverlayProp
               </div>
 
               {/* Bio */}
-              <div style={{ marginBottom: 20 }}>
-                <label style={{ display: 'block', fontFamily: 'Orbitron, sans-serif', color: 'var(--accent-gold)', fontSize: 9, letterSpacing: 4, textTransform: 'uppercase', marginBottom: 8 }}>
+              <div className="settings-field-group">
+                <label className="settings-field-label">
                   Bio
                 </label>
                 <textarea
                   value={bio}
-                  onChange={e => setBio(e.target.value.slice(0, 160))}
+                  onChange={e => setBio(e.target.value.slice(0, 50))}
                   rows={3}
                   placeholder="Brief transmission for the records..."
-                  style={{
-                    background: 'var(--input-bg)',
-                    border: '1px solid var(--input-border)',
-                    borderRadius: 2,
-                    color: 'var(--text-primary)',
-                    padding: '10px 12px',
-                    fontFamily: "'Exo 2', sans-serif",
-                    fontSize: 13,
-                    width: '100%',
-                    outline: 'none',
-                    resize: 'none',
-                    boxSizing: 'border-box',
-                    transition: 'border-color 0.2s',
-                  }}
-                  onFocus={e => { e.currentTarget.style.borderColor = 'var(--accent-gold)'; }}
-                  onBlur={e => { e.currentTarget.style.borderColor = 'var(--input-border)'; }}
+                  className="settings-bio-textarea"
                 />
-                <p style={{ textAlign: 'right', fontSize: 10, color: 'var(--text-dim)', margin: '4px 0 0', fontFamily: 'monospace' }}>{bio.length}/160</p>
+                <p style={{ textAlign: 'right', fontSize: 10, color: 'var(--text-dim)', margin: '4px 0 0', fontFamily: 'monospace' }}>{bio.length}/50</p>
               </div>
 
               {/* Cosmic ID */}
-              <div style={{ marginBottom: 24 }}>
-                <label style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 6, fontFamily: 'Orbitron, sans-serif', color: 'var(--accent-gold)', fontSize: 9, letterSpacing: 4, textTransform: 'uppercase', marginBottom: 8 }}>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+              <div className="settings-field-group cosmic-id">
+                <label className="settings-field-label cosmic-id-label">
+                  <div className="settings-cosmic-id-label-inner">
                     Cosmic ID
-                    <svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ opacity: 0.5 }}><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
+                    <svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="settings-cosmic-id-lock-icon"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
                   </div>
-                  <span style={{ fontSize: 8, color: 'var(--text-dim)', letterSpacing: 1 }}>
+                  <span className="settings-cosmic-id-changes-badge">
                     {Math.max(0, 3 - cosmicIdChanges)} / 3 CHANGES LEFT
                   </span>
                 </label>
@@ -329,12 +284,12 @@ export default function SettingsOverlay({ isOpen, onClose }: SettingsOverlayProp
                     placeholder="Enter new Cosmic ID..."
                   />
                 ) : (
-                  <div style={{ background: 'var(--input-bg)', border: '1px solid var(--input-border)', borderRadius: 2, padding: '10px 12px' }}>
-                    <span style={{ color: 'var(--accent-amber)', fontFamily: 'monospace', fontSize: 13 }}>@{username}</span>
+                  <div className="settings-immutable-id-container">
+                    <span className="settings-immutable-id-text">@{username}</span>
                   </div>
                 )}
                 
-                <p style={{ fontSize: 10, color: 'var(--text-dim)', margin: '4px 0 0', fontStyle: 'italic', fontFamily: "'Exo 2', sans-serif" }}>
+                <p className="settings-field-helper-text">
                   {cosmicIdChanges < 3 ? 'Choose carefully. Cosmic IDs are permanent after 3 changes.' : 'Cosmic ID is immutable. Changes exhausted.'}
                 </p>
               </div>
@@ -343,53 +298,59 @@ export default function SettingsOverlay({ isOpen, onClose }: SettingsOverlayProp
               <button
                 onClick={handleSave}
                 disabled={isSaving}
-                style={{
-                  width: '100%', padding: 12,
-                  background: 'transparent',
-                  border: '1px solid var(--accent-gold)',
-                  color: 'var(--accent-gold)',
-                  fontFamily: 'Orbitron, sans-serif', fontSize: 10, letterSpacing: 3,
-                  textTransform: 'uppercase', cursor: 'pointer', borderRadius: 2,
-                  transition: 'background 0.2s, box-shadow 0.2s',
-                  opacity: isSaving ? 0.6 : 1,
-                }}
-                onMouseEnter={e => {
-                  (e.currentTarget as HTMLButtonElement).style.background = 'rgba(200,160,80,0.1)';
-                  (e.currentTarget as HTMLButtonElement).style.boxShadow = '0 0 20px rgba(200,160,80,0.2)';
-                }}
-                onMouseLeave={e => {
-                  (e.currentTarget as HTMLButtonElement).style.background = 'transparent';
-                  (e.currentTarget as HTMLButtonElement).style.boxShadow = 'none';
-                }}
+                className="settings-save-btn"
               >
                 {isSaving ? 'TRANSMITTING...' : 'SAVE CHANGES'}
               </button>
 
               {/* Divider */}
-              <div className="parchment-divider" style={{ marginTop: 24 }}>
-                <span style={{ color: 'var(--text-dim)', fontSize: 9, letterSpacing: 3 }}>◆</span>
+              <div className="settings-divider">
+                <span>◆</span>
               </div>
 
               {/* Departure */}
-              <p style={{ fontFamily: 'Orbitron, sans-serif', color: '#C06040', fontSize: 9, letterSpacing: 4, textTransform: 'uppercase', marginBottom: 12 }}>
+              <p className="settings-danger-label">
                 Departure Protocols
               </p>
-              <button
-                onClick={handleLogout}
-                style={{
-                  width: '100%', padding: 12,
-                  background: 'transparent',
-                  border: '1px solid rgba(139,74,42,0.5)',
-                  color: '#C06040',
-                  fontFamily: 'Orbitron, sans-serif', fontSize: 10, letterSpacing: 3,
-                  textTransform: 'uppercase', cursor: 'pointer', borderRadius: 2,
-                  transition: 'background 0.2s',
-                }}
-                onMouseEnter={e => { (e.currentTarget as HTMLButtonElement).style.background = 'rgba(139,74,42,0.1)'; }}
-                onMouseLeave={e => { (e.currentTarget as HTMLButtonElement).style.background = 'transparent'; }}
-              >
-                SIGN OUT
-              </button>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+                <button
+                  onClick={handleLogout}
+                  className="settings-signout-btn"
+                >
+                  SIGN OUT
+                </button>
+
+                {!showDeleteConfirm ? (
+                  <button
+                    onClick={() => setShowDeleteConfirm(true)}
+                    className="settings-delete-btn"
+                  >
+                    DELETE ACCOUNT
+                  </button>
+                ) : (
+                  <div className="settings-delete-confirm-box">
+                    <p className="settings-delete-confirm-title">Self-Destruct Sequence</p>
+                    <p className="settings-delete-confirm-desc">
+                      This will delete all your transmissions, friendships, and account logs permanently. This action is irreversible.
+                    </p>
+                    <div className="settings-delete-confirm-actions">
+                      <button
+                        onClick={() => setShowDeleteConfirm(false)}
+                        className="settings-delete-cancel-btn"
+                      >
+                        Cancel
+                      </button>
+                      <button
+                        onClick={handleDeleteAccount}
+                        disabled={isDeleting}
+                        className="settings-delete-confirm-btn"
+                      >
+                        {isDeleting ? 'PURGING...' : 'Confirm'}
+                      </button>
+                    </div>
+                  </div>
+                )}
+              </div>
             </div>
 
             {/* Toast */}
@@ -399,16 +360,7 @@ export default function SettingsOverlay({ isOpen, onClose }: SettingsOverlayProp
                   initial={{ opacity: 0, y: 16, x: '-50%' }}
                   animate={{ opacity: 1, y: 0, x: '-50%' }}
                   exit={{ opacity: 0, x: '-50%' }}
-                  style={{
-                    position: 'absolute', bottom: 24, left: '50%',
-                    padding: '10px 20px', borderRadius: 2, 
-                    whiteSpace: 'normal', maxWidth: '340px', textAlign: 'center',
-                    fontFamily: 'Orbitron, sans-serif', fontSize: 10, letterSpacing: 3, textTransform: 'uppercase',
-                    background: toast.ok ? 'rgba(18,14,10,0.97)' : 'rgba(30,8,8,0.97)',
-                    border: toast.ok ? '1px solid var(--accent-gold)' : '1px solid #8B2A2A',
-                    color: toast.ok ? 'var(--accent-gold)' : '#C06060',
-                    zIndex: 200,
-                  }}
+                  className={`settings-toast ${toast.ok ? 'success' : 'error'}`}
                 >
                   {toast.msg}
                 </motion.div>

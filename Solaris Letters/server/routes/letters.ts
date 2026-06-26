@@ -1,8 +1,32 @@
 import { Router, Response } from 'express';
 import { prisma } from '../db';
 import { authenticate, AuthRequest } from '../middleware/auth';
+import rateLimit from 'express-rate-limit';
 
 const router = Router();
+
+const messageLimiter = rateLimit({
+  windowMs: 60 * 1000,
+  max: 5,
+  keyGenerator: (req) => {
+    return (req as AuthRequest).userId || 'anonymous';
+  },
+  validate: { trustProxy: false },
+  handler: (req, res) => {
+    res.status(429).json({ error: "Transmission limit reached. Wait before sending another." });
+  },
+  standardHeaders: true,
+  legacyHeaders: false,
+});
+
+function sanitizeInput(text: any, maxLength?: number): string {
+  if (typeof text !== 'string') return '';
+  const stripped = text.replace(/<[^>]*>/g, '');
+  if (maxLength !== undefined) {
+    return stripped.slice(0, maxLength);
+  }
+  return stripped;
+}
 
 // GET /api/letters — inbox + sent for current user
 router.get('/', authenticate, async (req: AuthRequest, res: Response) => {
@@ -26,12 +50,19 @@ router.get('/', authenticate, async (req: AuthRequest, res: Response) => {
       include,
     });
 
+    // Retrieve blocked user IDs
+    const blockedEntries = await prisma.$queryRawUnsafe<any[]>(
+      `SELECT target_id FROM blackhole_entries WHERE user_id = $1`,
+      userId
+    );
+    const blockedUserIds = blockedEntries.map(e => e.target_id);
+
     // RECEIVED: only letters delivered to the user that are due now or in the past
     // (future-scheduled letters stay hidden until delivery time)
     const received = await prisma.letter.findMany({
       where: {
         recipient_id: userId,
-        sender_id:    { not: userId }, // exclude future-self (already in sent)
+        sender_id:    { notIn: [userId, ...blockedUserIds] }, // exclude future-self and blocked users
         is_archived:  false,
         deliver_at:   { lte: now },
       },
@@ -67,7 +98,7 @@ router.get('/', authenticate, async (req: AuthRequest, res: Response) => {
 });
 
 // POST /api/letters — send a letter
-router.post('/', authenticate, async (req: AuthRequest, res: Response) => {
+router.post('/', authenticate, messageLimiter, async (req: AuthRequest, res: Response) => {
   try {
     let { recipient_id, body, paper_skin, stickers, is_future_self, deliver_at } = req.body;
     
@@ -75,17 +106,46 @@ router.post('/', authenticate, async (req: AuthRequest, res: Response) => {
       recipient_id = req.userId;
     }
 
-    if (!recipient_id || !body)
-      return res.status(400).json({ message: 'recipient_id and body required' });
+    // 1. Message body validations
+    if (typeof body !== 'string' || !body.trim()) {
+      return res.status(400).json({ error: "Message body must be a non-empty string." });
+    }
+    if (body.length > 2000) {
+      return res.status(400).json({ error: "Message too long. Maximum 2000 characters." });
+    }
+
+    // 2. Recipient validations
+    if (!recipient_id) {
+      return res.status(400).json({ error: "recipient_id is required." });
+    }
+    if (recipient_id === req.userId && !is_future_self) {
+      return res.status(400).json({ error: "Cannot send a transmission to yourself." });
+    }
 
     const receiver = await prisma.user.findUnique({ where: { id: recipient_id } });
-    if (!receiver) return res.status(404).json({ message: 'Receiver not found' });
+    if (!receiver) {
+      return res.status(400).json({ error: "Receiver not found." });
+    }
+
+    // 3. Database rate limit validation (past 60 seconds)
+    const sixtySecondsAgo = new Date(Date.now() - 60 * 1000);
+    const recentCount = await prisma.letter.count({
+      where: {
+        sender_id: req.userId!,
+        sent_at: { gte: sixtySecondsAgo }
+      }
+    });
+    if (recentCount >= 5) {
+      return res.status(429).json({ error: "Transmission limit reached. Wait before sending another." });
+    }
+
+    const cleanBody = sanitizeInput(body, 2000);
 
     const letter = await prisma.letter.create({
       data: {
         sender_id:     req.userId!,
         recipient_id:  receiver.id,
-        body,
+        body:          cleanBody,
         paper_skin:    paper_skin     || 'parchment',
         stickers:      stickers       || [],
         is_future_self: is_future_self || false,
@@ -108,7 +168,14 @@ router.post('/', authenticate, async (req: AuthRequest, res: Response) => {
     // Scheduled future letters will be handled by the persistent scheduler (scheduler.ts).
     const now = new Date();
     if (letter.deliver_at <= now) {
-      req.app.get('io')?.to(receiver.id).emit('new_letter', payload);
+      // Check if receiver has blocked sender
+      const blockCheck = await prisma.$queryRawUnsafe<any[]>(
+        `SELECT 1 FROM blackhole_entries WHERE user_id = $1 AND target_id = $2`,
+        receiver.id, req.userId!
+      );
+      if (blockCheck.length === 0) {
+        req.app.get('io')?.to(receiver.id).emit('new_letter', payload);
+      }
       // Mark as notified so scheduler skips it
       await prisma.letter.update({
         where: { id: letter.id },
@@ -126,13 +193,13 @@ router.post('/', authenticate, async (req: AuthRequest, res: Response) => {
 // PATCH /api/letters/:id/read — mark as read
 router.patch('/:id/read', authenticate, async (req: AuthRequest, res: Response) => {
   try {
-    const letter = await prisma.letter.findUnique({ where: { id: req.params.id } });
+    const letter = await prisma.letter.findUnique({ where: { id: req.params.id as string } });
     if (!letter) return res.status(404).json({ message: 'Letter not found' });
     if (letter.recipient_id !== req.userId)
       return res.status(403).json({ message: 'Forbidden' });
 
     const updated = await prisma.letter.update({
-      where: { id: req.params.id },
+      where: { id: req.params.id as string },
       data: { read_at: new Date() },
     });
     return res.json(updated);

@@ -14,6 +14,7 @@ export default function LetterComposer({ isOpen, onClose }: { isOpen: boolean; o
   const [sciFiMode, setSciFiMode] = useState(false);
   const [isSending, setIsSending] = useState(false);
   const [error, setError] = useState('');
+  const [rateLimitError, setRateLimitError] = useState('');
 
   const [searchQuery, setSearchQuery] = useState('');
   const [searchResults, setSearchResults] = useState<any[]>([]);
@@ -30,6 +31,7 @@ export default function LetterComposer({ isOpen, onClose }: { isOpen: boolean; o
       setSelectedRecipient(null);
       setIsScheduled(false);
       setDeliverAt('');
+      setRateLimitError('');
     }
   }, [isOpen]);
 
@@ -90,12 +92,55 @@ export default function LetterComposer({ isOpen, onClose }: { isOpen: boolean; o
     }
   };
 
+  const containsSuspiciousLink = (text: string): boolean => {
+    // 1. Shortened URLs: bit.ly, tinyurl, goo.gl, t.co (excluding t.co/twitter)
+    const shortenedRegex = /(bit\.ly|tinyurl|goo\.gl|t\.co\/(?!twitter))/i;
+    if (shortenedRegex.test(text)) return true;
+
+    // 2. IP address instead of domain name: http(s)://1.2.3.4
+    const ipUrlRegex = /https?:\/\/\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}/i;
+    if (ipUrlRegex.test(text)) return true;
+
+    // 3. Credential-harvesting keywords combined with a link
+    // Any link/URL-like pattern: http://, https://, or www. or generic url format
+    const hasLink = /https?:\/\/[^\s]+|www\.[^\s]+|[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}\/[^\s]*/i.test(text);
+    if (hasLink) {
+      const keywords = ["verify", "login", "password", "account suspended", "click here", "confirm your"];
+      const lowerText = text.toLowerCase();
+      if (keywords.some(keyword => lowerText.includes(keyword))) {
+        return true;
+      }
+    }
+
+    // 4. Executable file extensions in URLs
+    const exeUrlRegex = /\.(exe|bat|cmd|msi|dmg|apk|sh)\b/i;
+    if (exeUrlRegex.test(text)) {
+      // Ensure the extension is actually part of a URL structure
+      const hasLinkPart = /https?:\/\/[^\s]+|www\.[^\s]+/i.test(text);
+      if (hasLinkPart) return true;
+    }
+
+    return false;
+  };
+
   const handleSend = async (e: React.FormEvent) => {
     e.preventDefault();
     const finalRecipient = composerRecipient || selectedRecipient;
     if (!content.trim() || !finalRecipient) return;
     setIsSending(true);
     setError('');
+    setRateLimitError('');
+
+    if (containsSuspiciousLink(content)) {
+      setRateLimitError('This transmission was blocked — it appears to contain an unsafe link.');
+      setIsSending(false);
+      try {
+        await api.post<unknown>('/security/flag', { timestamp: new Date().toISOString() });
+      } catch (err) {
+        console.error('Failed to log blocked transmission attempt:', err);
+      }
+      return;
+    }
 
     if (isScheduled && !deliverAt) {
       setError(finalRecipient.id === 'sun'
@@ -127,6 +172,8 @@ export default function LetterComposer({ isOpen, onClose }: { isOpen: boolean; o
       const errorMsg = err instanceof Error ? err.message : String(err);
       if (errorMsg.toLowerCase().includes('token')) {
         setError('Your session has expired. Please refresh the page to log in again.');
+      } else if (errorMsg.includes('429') || errorMsg.includes('Transmission limit reached')) {
+        setRateLimitError('Transmission limit reached. Wait before sending another.');
       } else {
         setError(errorMsg || 'Failed to send letter');
       }
@@ -175,8 +222,7 @@ export default function LetterComposer({ isOpen, onClose }: { isOpen: boolean; o
           initial={{ opacity: 0 }}
           animate={{ opacity: 1 }}
           exit={{ opacity: 0 }}
-          className="absolute inset-0 z-[100]"
-          style={{ background: 'rgba(0,0,10,0.95)', backdropFilter: 'blur(20px)' }}
+          className="absolute inset-0 z-[100] composer-backdrop"
           onClick={() => {
             onClose();
             setContent('');
@@ -189,16 +235,7 @@ export default function LetterComposer({ isOpen, onClose }: { isOpen: boolean; o
           initial={{ opacity: 0, scale: 0.95, y: 10 }}
           animate={{ opacity: 1, scale: 1, y: 0 }}
           exit={{ opacity: 0, scale: 0.95, y: 10 }}
-          className="relative z-[101] w-full"
-          style={{ 
-            maxWidth: '620px',
-            background: 'linear-gradient(145deg, rgba(12, 8, 24, 0.98), rgba(6, 4, 12, 0.95))',
-            border: '1px solid rgba(138, 90, 255, 0.2)',
-            borderRadius: '16px',
-            padding: '40px',
-            boxShadow: '0 0 50px rgba(80, 40, 200, 0.15), inset 0 1px 0 rgba(255,255,255,0.05)',
-            backdropFilter: 'blur(24px)'
-          }}
+          className="cosmic-composer-modal relative z-[101] w-full composer-modal-body"
         >
           {/* Header */}
           <div className="mb-4 flex justify-between items-start">
@@ -326,45 +363,41 @@ export default function LetterComposer({ isOpen, onClose }: { isOpen: boolean; o
             {/* The Paper */}
             <div 
               id="paper-container"
-              className={`relative rounded-xl overflow-hidden mb-6 group`}
+              className={`relative rounded-xl overflow-hidden mb-6 group ${sciFiMode ? 'paper-container--scifi' : 'paper-container--classic'}`}
               style={{
                 ...PAPER_STYLES[paperSkin],
-                ...(sciFiMode ? {
-                  border: `1px solid rgba(${sciFiColors.rgb}, 0.5)`,
-                  boxShadow: `inset 0 0 50px rgba(${sciFiColors.rgb}, 0.2), 0 0 30px rgba(${sciFiColors.rgb}, 0.2)`,
-                } : {
-                  boxShadow: 'inset 0 0 20px rgba(0,0,0,0.1)',
-                })
-              }}
+                '--sci-fi-color': sciFiColors.hex,
+                '--sci-fi-rgb': sciFiColors.rgb,
+              } as React.CSSProperties}
             >
               {sciFiMode && paperSkin === 'parchment' && (
                 <>
-                  <div className="absolute inset-0 pointer-events-none z-30 opacity-40 mix-blend-overlay" style={{ background: 'repeating-linear-gradient(rgba(255,215,0,0.1), rgba(255,215,0,0.1) 2px, transparent 2px, transparent 4px)' }} />
+                  <div className="absolute inset-0 pointer-events-none z-30 opacity-40 mix-blend-overlay scifi-parchment-scanlines" />
                   <div className="absolute inset-0 pointer-events-none z-20 shadow-[inset_0_0_80px_rgba(255,215,0,0.3)]" />
-                  <div className="absolute top-2 left-2 w-4 h-4 border-t-4 border-l-4 pointer-events-none z-20" style={{ borderColor: sciFiColors.hex }} />
-                  <div className="absolute bottom-2 right-2 w-4 h-4 border-b-4 border-r-4 pointer-events-none z-20" style={{ borderColor: sciFiColors.hex }} />
-                  <div className="absolute top-4 right-6 text-[12px] font-mono animate-pulse pointer-events-none z-20" style={{ color: sciFiColors.hex }}>REC_</div>
+                  <div className="absolute top-2 left-2 w-4 h-4 border-t-4 border-l-4 pointer-events-none z-20 scifi-border-corner" />
+                  <div className="absolute bottom-2 right-2 w-4 h-4 border-b-4 border-r-4 pointer-events-none z-20 scifi-border-corner" />
+                  <div className="absolute top-4 right-6 text-[12px] font-mono animate-pulse pointer-events-none z-20 scifi-text">REC_</div>
                 </>
               )}
 
               {sciFiMode && paperSkin === 'blueprint' && (
                 <>
-                  <div className="absolute inset-0 pointer-events-none z-30 opacity-30" style={{ background: 'radial-gradient(circle at 50% 50%, transparent 40%, rgba(74,158,255,0.3) 100%)' }} />
+                  <div className="absolute inset-0 pointer-events-none z-30 opacity-30 scifi-blueprint-glow" />
                   <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[400px] h-[400px] border border-[#4A9EFF]/20 rounded-full pointer-events-none z-20" />
                   <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[280px] h-[280px] border border-[#4A9EFF]/10 rounded-full border-dashed animate-[spin_60s_linear_infinite] pointer-events-none z-20" />
                   <div className="absolute top-0 bottom-0 left-12 border-l border-[#4A9EFF]/30 border-dashed pointer-events-none z-20" />
                   <div className="absolute top-12 left-0 right-0 border-t border-[#4A9EFF]/30 border-dashed pointer-events-none z-20" />
-                  <div className="absolute bottom-3 right-4 text-[10px] font-mono tracking-widest pointer-events-none z-20" style={{ color: sciFiColors.hex }}>PROJ: STELLAR_09 // REV. A</div>
+                  <div className="absolute bottom-3 right-4 text-[10px] font-mono tracking-widest pointer-events-none z-20 scifi-text">PROJ: STELLAR_09 // REV. A</div>
                 </>
               )}
 
               {sciFiMode && paperSkin === 'grid' && (
                 <>
-                  <div className="absolute inset-0 pointer-events-none z-30 opacity-40" style={{ background: 'repeating-linear-gradient(90deg, transparent, transparent 19px, rgba(0,255,204,0.15) 20px)' }} />
+                  <div className="absolute inset-0 pointer-events-none z-30 opacity-40 scifi-grid-scanlines" />
                   <div className="absolute left-0 top-0 w-2 h-full bg-gradient-to-b from-transparent via-[#00ffcc]/50 to-transparent pointer-events-none z-20" />
-                  <div className="absolute top-0 right-0 w-8 h-8 border-t-2 border-r-2 pointer-events-none z-20" style={{ borderColor: sciFiColors.hex }} />
-                  <div className="absolute bottom-0 left-0 w-8 h-8 border-b-2 border-l-2 pointer-events-none z-20" style={{ borderColor: sciFiColors.hex }} />
-                  <div className="absolute top-2 left-6 text-[10px] font-mono tracking-tighter pointer-events-none z-20" style={{ color: sciFiColors.hex }}>0x00FFCC // ROOT_ACCESS_GRANTED</div>
+                  <div className="absolute top-0 right-0 w-8 h-8 border-t-2 border-r-2 pointer-events-none z-20 scifi-border-corner" />
+                  <div className="absolute bottom-0 left-0 w-8 h-8 border-b-2 border-l-2 pointer-events-none z-20 scifi-border-corner" />
+                  <div className="absolute top-2 left-6 text-[10px] font-mono tracking-tighter pointer-events-none z-20 scifi-text">0x00FFCC // ROOT_ACCESS_GRANTED</div>
                 </>
               )}
 
@@ -380,18 +413,18 @@ export default function LetterComposer({ isOpen, onClose }: { isOpen: boolean; o
                     <div className="w-16 h-1 bg-[#b8a6ff]/40" />
                     <div className="w-8 h-1 bg-[#b8a6ff]/40" />
                   </div>
-                  <div className="absolute bottom-4 right-4 text-[10px] font-mono pointer-events-none z-20" style={{ color: sciFiColors.hex }}>[X: 42.11, Y: 11.90, Z: 88.02]</div>
+                  <div className="absolute bottom-4 right-4 text-[10px] font-mono pointer-events-none z-20 scifi-text">[X: 42.11, Y: 11.90, Z: 88.02]</div>
                 </>
               )}
 
               {sciFiMode && paperSkin === 'obsidian' && (
                 <>
-                  <div className="absolute inset-0 pointer-events-none z-30 opacity-40 mix-blend-overlay" style={{ background: 'repeating-linear-gradient(45deg, transparent, transparent 10px, rgba(0,0,0,0.8) 10px, rgba(0,0,0,0.8) 20px)' }} />
+                  <div className="absolute inset-0 pointer-events-none z-30 opacity-40 mix-blend-overlay scifi-obsidian-stripes" />
                   <div className="absolute top-0 left-0 right-0 h-6 bg-[#8a5aff]/20 border-b border-[#8a5aff]/50 flex items-center justify-center pointer-events-none z-20">
-                    <span className="text-[10px] font-bold tracking-[0.3em]" style={{ color: sciFiColors.hex }}>CLASSIFIED // LEVEL 5</span>
+                    <span className="text-[10px] font-bold tracking-[0.3em] scifi-text">CLASSIFIED // LEVEL 5</span>
                   </div>
                   <div className="absolute bottom-0 left-0 right-0 h-6 bg-[#8a5aff]/20 border-t border-[#8a5aff]/50 flex items-center justify-center pointer-events-none z-20">
-                    <span className="text-[10px] font-bold tracking-[0.3em]" style={{ color: sciFiColors.hex }}>SECURE CHANNEL</span>
+                    <span className="text-[10px] font-bold tracking-[0.3em] scifi-text">SECURE CHANNEL</span>
                   </div>
                   <div className="absolute top-1/2 left-4 -translate-y-1/2 w-1 h-32 bg-[#8a5aff]/50 pointer-events-none z-20" />
                   <div className="absolute top-1/2 right-4 -translate-y-1/2 w-1 h-32 bg-[#8a5aff]/50 pointer-events-none z-20" />
@@ -413,15 +446,11 @@ export default function LetterComposer({ isOpen, onClose }: { isOpen: boolean; o
                   }}
                   onDoubleClick={() => setPlacedStickers(p => p.filter(s => s.id !== sticker.id))}
                   title="Double-click to remove, drag to move"
-                  className="absolute cursor-move hover:scale-125 transition-transform z-20"
+                  className="composer-sticker"
                   style={{
                     left: `${sticker.x}%`,
                     top: `${sticker.y}%`,
                     transform: `translate(-50%, -50%) rotate(${sticker.rot}deg)`,
-                    width: '32px',
-                    height: '32px',
-                    opacity: 0.8,
-                    color: PAPER_STYLES[paperSkin].color,
                     textShadow: sciFiMode ? `0 0 8px rgba(${sciFiColors.rgb},0.8)` : 'none'
                   }}
                 >
@@ -434,16 +463,7 @@ export default function LetterComposer({ isOpen, onClose }: { isOpen: boolean; o
                 onChange={e => setContent(e.target.value)}
                 onClick={handleTextareaClick}
                 placeholder="Write your transmission..."
-                className="w-full h-64 p-8 bg-transparent focus:outline-none resize-none relative z-10"
-                style={{
-                  fontFamily: sciFiMode ? '"Orbitron", sans-serif' : '"Special Elite", cursive',
-                  fontSize: sciFiMode ? '14px' : '18px',
-                  lineHeight: '32px',
-                  letterSpacing: sciFiMode ? '2px' : 'normal',
-                  textTransform: sciFiMode ? 'uppercase' : 'none',
-                  color: PAPER_STYLES[paperSkin].color,
-                  textShadow: sciFiMode ? `0 0 8px rgba(${sciFiColors.rgb},0.8)` : 'none'
-                }}
+                className={`w-full h-64 p-8 bg-transparent focus:outline-none resize-none relative z-10 composer-textarea ${sciFiMode ? 'composer-textarea--scifi' : 'composer-textarea--classic'}`}
               />
             </div>
 
@@ -459,8 +479,7 @@ export default function LetterComposer({ isOpen, onClose }: { isOpen: boolean; o
                         setIsScheduled(e.target.checked);
                         if (!e.target.checked) setDeliverAt('');
                       }}
-                      style={{ filter: 'hue-rotate(240deg)' }}
-                      className="w-4 h-4 rounded border-white/20 bg-[#050510] text-[#8a5aff] focus:ring-0 cursor-pointer accent-[#8a5aff]"
+                      className="composer-schedule-checkbox w-4 h-4 rounded border-white/20 bg-[#050510] text-[#8a5aff] focus:ring-0 cursor-pointer accent-[#8a5aff]"
                     />
                     <span>Schedule transmission for future delivery</span>
                   </label>
@@ -516,32 +535,37 @@ export default function LetterComposer({ isOpen, onClose }: { isOpen: boolean; o
               </div>
 
               {/* Action Buttons */}
-              <div className="flex gap-3 w-full sm:w-auto mt-2 sm:mt-0">
-                <button
-                  type="button"
-                  onClick={() => {
-                    onClose();
-                    setContent('');
-                    setError('');
-                    setPlacedStickers([]);
-                  }}
-                  className="px-6 py-3 rounded text-[#a0b9ff]/60 text-xs font-bold uppercase tracking-widest font-orbitron hover:text-white transition-colors"
-                >
-                  ABORT
-                </button>
+              <div className="flex flex-col items-end gap-2 w-full sm:w-auto mt-2 sm:mt-0">
+                <div className="flex gap-3 w-full sm:w-auto">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      onClose();
+                      setContent('');
+                      setError('');
+                      setRateLimitError('');
+                      setPlacedStickers([]);
+                    }}
+                    className="px-6 py-3 rounded text-[#a0b9ff]/60 text-xs font-bold uppercase tracking-widest font-orbitron hover:text-white transition-colors"
+                  >
+                    ABORT
+                  </button>
+                  
+                  <button
+                    type="submit"
+                    disabled={isSending || !content.trim() || !finalRecipient}
+                    className="composer-send-btn px-8 py-3 rounded text-white text-xs font-bold uppercase tracking-widest font-orbitron transition-all disabled:opacity-50 disabled:cursor-not-allowed shadow-[0_0_20px_rgba(138,90,255,0.3)] hover:shadow-[0_0_30px_rgba(138,90,255,0.5)] flex items-center gap-2"
+                  >
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"/><polyline points="22,6 12,13 2,6"/></svg>
+                    {isSending ? 'LAUNCHING...' : 'SEND'}
+                  </button>
+                </div>
                 
-                <button
-                  type="submit"
-                  disabled={isSending || !content.trim() || !finalRecipient}
-                  className="px-8 py-3 rounded text-white text-xs font-bold uppercase tracking-widest font-orbitron transition-all disabled:opacity-50 disabled:cursor-not-allowed shadow-[0_0_20px_rgba(138,90,255,0.3)] hover:shadow-[0_0_30px_rgba(138,90,255,0.5)] flex items-center gap-2"
-                  style={{
-                    background: 'linear-gradient(135deg, #3a1c7a, #200d46)',
-                    border: '1px solid rgba(138,90,255,0.5)'
-                  }}
-                >
-                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"/><polyline points="22,6 12,13 2,6"/></svg>
-                  {isSending ? 'LAUNCHING...' : 'SEND'}
-                </button>
+                {rateLimitError && (
+                  <div className="text-red-400 text-xs font-mono mt-1 text-center sm:text-right w-full">
+                    {rateLimitError}
+                  </div>
+                )}
               </div>
             </div>
           </form>

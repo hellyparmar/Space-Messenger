@@ -29,21 +29,24 @@ export default function PlanetDetails({ onCompose }: PlanetDetailsProps) {
   const fetchFriends = useAppStore(s => s.fetchFriends);
   useEffect(() => {
     if (selectedPlanet && selectedPlanet !== 'Sun') {
-      setLoadingFriends(true);
-      fetchFriends().finally(() => setLoadingFriends(false));
+      void (async () => {
+        setLoadingFriends(true);
+        try { await fetchFriends(); } finally { setLoadingFriends(false); }
+      })();
     }
   }, [selectedPlanet, fetchFriends]);
 
   useEffect(() => {
-    if (friend) {
-      api.get<{ sent: number; received: number; unread: number }>(`/api/letters/stats?friendId=${friend.id}`)
-        .then((res: { sent: number; received: number; unread: number }) =>
-          setStatsData({ sent: res.sent, received: res.received, unread: res.unread })
-        )
-        .catch(() => {});
-    } else {
-      setStatsData({ sent: 0, received: 0, unread: 0 });
-    }
+    void (async () => {
+      if (friend) {
+        try {
+          const res = await api.get<{ sent: number; received: number; unread: number }>(`/api/letters/stats?friendId=${friend.id}`);
+          setStatsData({ sent: res.sent, received: res.received, unread: res.unread });
+        } catch { /* silent */ }
+      } else {
+        setStatsData({ sent: 0, received: 0, unread: 0 });
+      }
+    })();
   }, [friend]);
 
   if (!selectedPlanet) return null;
@@ -85,18 +88,18 @@ export default function PlanetDetails({ onCompose }: PlanetDetailsProps) {
           initial={{ opacity: 0, x: -50 }}
           animate={{ opacity: 1, x: 0 }}
           exit={{ opacity: 0, x: -50 }}
-          className="fixed left-8 top-1/2 -translate-y-1/2 w-80 z-40"
+          className="planet-details-panel"
         >
-          <div className="bg-[#050510]/60 border border-[#4A9EFF]/30 rounded-3xl p-6 backdrop-blur-2xl shadow-2xl relative overflow-hidden group">
-            <button onClick={() => setSelectedPlanet(null)} className="absolute top-4 right-4 text-[#4A9EFF]/40 hover:text-[#4A9EFF]/100">✕</button>
-            <div className="relative">
-              <h2 className="text-3xl font-bold text-[#4A9EFF] tracking-tighter font-outfit">THE SUN</h2>
-              <p className="text-[#4A9EFF]/60 text-[10px] font-bold uppercase tracking-widest mb-4">Central Star · Primary Interface</p>
+          <div className="planet-details-card planet-details-card--sun group">
+            <button onClick={() => setSelectedPlanet(null)} className="planet-details-close-btn">✕</button>
+            <div>
+              <h2 className="planet-details-title" style={{ color: '#4A9EFF' }}>THE SUN</h2>
+              <p className="planet-details-sector" style={{ color: 'rgba(74, 158, 255, 0.6)', marginBottom: 16 }}>Central Star · Primary Interface</p>
               
-              <div className="space-y-4">
-                <div className="bg-amber-500/5 border border-amber-500/10 rounded-xl p-4">
-                  <h3 className="text-white font-bold text-sm mb-1">Future Self</h3>
-                  <p className="text-white/40 text-[10px]">Schedule a letter to be delivered to your own inbox at a future date.</p>
+              <div>
+                <div className="planet-details-sun-block">
+                  <h3 className="planet-details-sun-title">Future Self</h3>
+                  <p className="planet-details-sun-desc">Schedule a letter to be delivered to your own inbox at a future date.</p>
                   <button onClick={() => {
                     setComposerRecipient({
                       id: 'sun',
@@ -105,14 +108,14 @@ export default function PlanetDetails({ onCompose }: PlanetDetailsProps) {
                       planetName: 'Sun'
                     });
                     onCompose();
-                  }} className="mt-3 w-full py-2 bg-[#4A9EFF] text-black text-[10px] font-bold uppercase rounded-lg hover:brightness-110 transition-all">Write to Future Self</button>
+                  }} className="planet-details-sun-btn">Write to Future Self</button>
                 </div>
-                <div className="bg-[#4A9EFF]/5 border border-[#4A9EFF]/10 rounded-xl p-4">
-                  <h3 className="text-white font-bold text-sm mb-1">Global Inbox</h3>
-                  <p className="text-white/40 text-[10px]">View all transmissions received from the cosmos.</p>
+                <div className="planet-details-sun-block planet-details-sun-block--blue">
+                  <h3 className="planet-details-sun-title">Global Inbox</h3>
+                  <p className="planet-details-sun-desc">View all transmissions received from the cosmos.</p>
                   <button 
                     onClick={() => setInboxOpen(true)}
-                    className="mt-3 w-full py-2 border border-[#4A9EFF]/30 text-[#4A9EFF] text-[10px] font-bold uppercase rounded-lg"
+                    className="planet-details-sun-btn planet-details-sun-btn--outline"
                   >
                     Open Inbox
                   </button>
@@ -133,40 +136,37 @@ export default function PlanetDetails({ onCompose }: PlanetDetailsProps) {
             initial={{ opacity: 0, x: -50 }}
             animate={{ opacity: 1, x: 0 }}
             exit={{ opacity: 0, x: -50 }}
-            className="fixed left-8 top-1/2 -translate-y-1/2 w-80 z-40"
+            className="planet-details-panel"
           >
-          <div className="bg-[#050510]/60 border border-white/10 rounded-3xl p-6 backdrop-blur-2xl shadow-2xl relative overflow-hidden group">
-            {/* Aesthetic background scanline effect */}
-            <div className="absolute inset-0 bg-gradient-to-b from-white/[0.02] to-transparent pointer-events-none" />
-            
+          <div className="planet-details-card group">
             {/* Close button */}
             <button 
               onClick={() => setSelectedPlanet(null)}
-              className="absolute top-4 right-4 text-white/20 hover:text-white/60 transition-colors"
+              className="planet-details-close-btn"
             >
               ✕
             </button>
 
             {/* Content */}
-            <div className="relative">
-              <div className="flex items-baseline gap-2 mb-1">
-                <h2 className="text-3xl font-bold text-white tracking-tighter font-outfit">
+            <div>
+              <div className="planet-details-header">
+                <h2 className="planet-details-title">
                   {selectedPlanet}
                 </h2>
-                <span className="text-[10px] text-[#4A9EFF] font-mono font-bold tracking-widest uppercase">Sector {selectedPlanet[0]}1</span>
+                <span className="planet-details-sector">Sector {selectedPlanet[0]}1</span>
               </div>
               
               {friend ? (
                 <>
                   {/* Friend Panel */}
-                  <div className="mb-6 flex items-center gap-4">
+                  <div className="planet-details-profile">
                     {(() => {
                       const hue = friend.username.split('').reduce((acc, c) => acc + c.charCodeAt(0), 0) % 360;
                       return (
                         <div
-                          className="w-10 h-10 rounded-full flex items-center justify-center font-bold text-[#F0E8D8] text-lg font-orbitron shadow-lg border border-white/20"
+                          className="planet-friend-avatar"
                           style={{
-                            background: `conic-gradient(from 180deg at 50% 50%, hsl(${hue},40%,20%), hsl(${hue + 60},35%,25%), hsl(${hue},40%,20%))`
+                            ['--avatar-hue' as any]: hue
                           }}
                         >
                           {(friend.displayName || friend.username || '').charAt(0).toUpperCase()}
@@ -174,39 +174,47 @@ export default function PlanetDetails({ onCompose }: PlanetDetailsProps) {
                       );
                     })()}
                     <div>
-                      <p className="text-white font-bold text-xl leading-none font-outfit">
+                      <p className="planet-details-profile-name">
                         {friend.displayName || friend.username}
                       </p>
-                      <p className="text-white/40 text-[10px] uppercase font-mono tracking-widest mt-1">
+                      <p className="planet-details-profile-username">
                         @{friend.username}
                       </p>
                     </div>
                   </div>
                   
+                  {/* Friend Bio */}
+                  <div className="planet-details-bio-box">
+                    <p className="planet-details-bio-label">Cosmic Bio</p>
+                    <p className={`planet-details-bio-content ${!friend.bio ? 'planet-details-bio-content--empty' : ''}`}>
+                      {friend.bio || "No subspace bio broadcasted yet."}
+                    </p>
+                  </div>
+                  
                   {/* Stats Grid */}
-                  <div className="grid grid-cols-2 gap-4 mb-6">
-                    <div className="bg-white/5 border border-white/5 rounded-xl p-3 flex flex-col">
-                      <p className="text-[9px] text-white/20 uppercase font-bold tracking-widest mb-1">Letters Sent</p>
-                      <p className="text-white/90 text-sm font-mono tabular-nums mt-auto">{statsData.sent}</p>
+                  <div className="planet-details-stats-grid">
+                    <div className="planet-details-stat-card">
+                      <p className="planet-details-stat-label">Letters Sent</p>
+                      <p className="planet-details-stat-value">{statsData.sent}</p>
                     </div>
-                    <div className="bg-white/5 border border-white/5 rounded-xl p-3 flex flex-col">
-                      <p className="text-[9px] text-white/20 uppercase font-bold tracking-widest mb-1">Letters Received</p>
-                      <p className="text-white/90 text-sm font-mono tabular-nums mt-auto">{statsData.received}</p>
+                    <div className="planet-details-stat-card">
+                      <p className="planet-details-stat-label">Letters Received</p>
+                      <p className="planet-details-stat-value">{statsData.received}</p>
                     </div>
-                    <div className="bg-white/5 border border-white/5 rounded-xl p-3">
-                      <p className="text-[9px] text-white/20 uppercase font-bold tracking-widest mb-1">Unread</p>
-                      <p className={`text-sm font-mono ${statsData.unread > 0 ? 'text-[#4A9EFF] font-bold' : 'text-white/90'}`}>{statsData.unread}</p>
+                    <div className="planet-details-stat-card">
+                      <p className="planet-details-stat-label">Unread</p>
+                      <p className={`planet-details-stat-value ${statsData.unread > 0 ? 'planet-details-stat-value--highlight' : ''}`}>{statsData.unread}</p>
                     </div>
-                    <div className="bg-white/5 border border-white/5 rounded-xl p-3">
-                      <p className="text-[9px] text-white/20 uppercase font-bold tracking-widest mb-1">Status</p>
-                      <p className={`text-sm font-mono font-bold ${friend.isDeactivated ? 'text-red-500' : 'text-green-500'}`}>
+                    <div className="planet-details-stat-card">
+                      <p className="planet-details-stat-label">Status</p>
+                      <p className={`planet-details-stat-value ${friend.isDeactivated ? 'planet-details-stat-value--inactive' : 'planet-details-stat-value--active'}`}>
                         {friend.isDeactivated ? 'INACTIVE' : 'ACTIVE'}
                       </p>
                     </div>
                   </div>
 
                   {/* Actions */}
-                  <div className="flex flex-col gap-3 mt-4 mb-8">
+                  <div className="planet-details-actions-list">
                     <button
                       onClick={() => {
                         setComposerRecipient({
@@ -217,7 +225,7 @@ export default function PlanetDetails({ onCompose }: PlanetDetailsProps) {
                         });
                         onCompose();
                       }}
-                      className="w-full py-4 rounded-xl bg-[#0a1a3a] border border-[#4A9EFF]/50 text-[#4A9EFF] text-[12px] font-bold uppercase tracking-widest font-orbitron hover:bg-[#4A9EFF] hover:text-black transition-all flex items-center justify-center gap-2"
+                      className="planet-details-btn-action planet-details-btn-action--primary"
                     >
                       <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"/><polyline points="22,6 12,13 2,6"/></svg>
                       <span>SEND TRANSMISSION</span>
@@ -229,7 +237,7 @@ export default function PlanetDetails({ onCompose }: PlanetDetailsProps) {
                           setInboxFriendFilter(friend?.id || null);
                           setInboxOpen(true);
                         }}
-                        className="w-full py-3 rounded-xl bg-white/5 border border-white/20 text-white/80 text-[10px] font-bold uppercase tracking-widest hover:bg-white/10 transition-all flex items-center justify-center gap-2"
+                        className="planet-details-btn-action planet-details-btn-action--secondary"
                       >
                         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"/><polyline points="22,6 12,13 2,6"/></svg>
                         <span>VIEW LETTERS</span>
@@ -241,7 +249,7 @@ export default function PlanetDetails({ onCompose }: PlanetDetailsProps) {
                       <>
                         <button
                           onClick={() => setEjectConfirm(true)}
-                          className="w-full py-2 rounded-xl border border-red-900/40 text-red-500/60 text-[9px] font-bold uppercase tracking-widest hover:bg-red-900/10 hover:text-red-400 transition-all flex items-center justify-center gap-1.5 mt-1"
+                          className="planet-details-btn-action planet-details-btn-action--danger"
                         >
                           <svg width="10" height="10" viewBox="0 0 24 24" fill="currentColor"><circle cx="12" cy="12" r="10"/></svg>
                           Eject to Black Hole
@@ -249,15 +257,15 @@ export default function PlanetDetails({ onCompose }: PlanetDetailsProps) {
 
                         {/* Confirmation dialog */}
                         {ejectConfirm && (
-                          <div className="mt-2 p-4 rounded-xl border border-red-500/30 bg-red-950/20">
-                            <p className="text-red-400 text-[10px] font-bold uppercase tracking-wider mb-1">Confirm Ejection</p>
-                            <p className="text-white/50 text-[10px] leading-relaxed mb-3">
+                          <div className="planet-details-eject-dialog">
+                            <p className="planet-details-eject-title">Confirm Ejection</p>
+                            <p className="planet-details-eject-desc">
                               Are you sure you want to eject @{friend.username || friend.cosmic_id} into the black hole? Their planet will be destroyed and removed from your solar system.
                             </p>
-                            <div className="flex gap-2">
+                            <div className="planet-details-eject-btns">
                               <button
                                 onClick={() => setEjectConfirm(false)}
-                                className="flex-1 py-2 rounded-lg border border-white/10 text-white/40 text-[9px] font-bold uppercase hover:bg-white/5 transition-all"
+                                className="planet-details-eject-btn"
                               >Cancel</button>
                               <button
                                 disabled={isEjecting}
@@ -277,7 +285,7 @@ export default function PlanetDetails({ onCompose }: PlanetDetailsProps) {
                                     setIsEjecting(false);
                                   }
                                 }}
-                                className="flex-1 py-2 rounded-lg border border-red-500/50 text-red-400 text-[9px] font-bold uppercase hover:bg-red-500/10 transition-all disabled:opacity-50"
+                                className="planet-details-eject-btn planet-details-eject-btn--confirm"
                               >{isEjecting ? 'Ejecting...' : 'Confirm'}</button>
                             </div>
                           </div>
@@ -287,58 +295,38 @@ export default function PlanetDetails({ onCompose }: PlanetDetailsProps) {
                   </div>
                 </>
               ) : loadingFriends ? (
-                <div className="mb-6 p-3 bg-white/5 border border-white/10 rounded-xl opacity-60">
-                  <p className="text-[#4A9EFF]/60 text-[10px] font-mono tracking-widest animate-pulse">SCANNING SECTOR...</p>
+                <div className="planet-details-empty-box">
+                  <p className="planet-details-empty-text animate-pulse" style={{ color: '#4A9EFF', fontWeight: 'bold' }}>SCANNING SECTOR...</p>
                 </div>
               ) : (
                 <>
-                  <div className="mb-6 p-3 bg-white/5 border border-white/10 rounded-xl opacity-40">
-                    <p className="text-white/40 text-[10px] italic">No resonance detected in this sector.</p>
+                  <div className="planet-details-empty-box">
+                    <p className="planet-details-empty-text">No resonance detected in this sector.</p>
                   </div>
 
-                  <div className="w-12 h-1 bg-gradient-to-r from-[#4A9EFF] to-transparent rounded-full mb-6" />
+                  <div className="planet-details-divider" />
 
-                  <p className="text-white/50 text-xs leading-relaxed mb-6 font-medium">
+                  <p className="planet-details-desc-text">
                     {stats.desc}
                   </p>
 
-                  <div className="text-center py-4 text-red-500/80 text-[10px] font-bold tracking-widest uppercase border border-red-500/20 bg-red-500/5 rounded-xl mb-6">
+                  <div className="planet-details-no-target-badge">
                     NO TRANSMISSION TARGET
-                  </div>
-
-                  {/* Stats Grid */}
-                  <div className="grid grid-cols-2 gap-4 mb-8">
-                    <div className="bg-white/5 border border-white/5 rounded-xl p-3">
-                      <p className="text-[9px] text-white/20 uppercase font-bold tracking-widest mb-1">Distance</p>
-                      <p className="text-white/90 text-sm font-mono">{stats.dist}</p>
-                    </div>
-                    <div className="bg-white/5 border border-white/5 rounded-xl p-3">
-                      <p className="text-[9px] text-white/20 uppercase font-bold tracking-widest mb-1">Temp Avg</p>
-                      <p className="text-white/90 text-sm font-mono">{stats.temp}</p>
-                    </div>
-                    <div className="bg-white/5 border border-white/5 rounded-xl p-3">
-                      <p className="text-[9px] text-white/20 uppercase font-bold tracking-widest mb-1">Gravity</p>
-                      <p className="text-white/90 text-sm font-mono">{stats.gravity}</p>
-                    </div>
-                    <div className="bg-white/5 border border-white/5 rounded-xl p-3">
-                      <p className="text-[9px] text-white/20 uppercase font-bold tracking-widest mb-1">Signal</p>
-                      <p className="text-red-400 text-sm font-mono">NULL</p>
-                    </div>
                   </div>
                 </>
               )}
             </div>
             
             {/* Tech details footer */}
-            <div className="mt-6 pt-4 border-t border-white/10 flex flex-col gap-2">
-              <p className="text-[10px] text-amber-400 font-orbitron font-bold tracking-widest uppercase flex items-center gap-1.5">
+            <div className="planet-details-footer">
+              <p className="planet-details-footer-title">
                 <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" className="animate-pulse">
                   <path d="M2 12h20M12 2v20" />
                   <circle cx="12" cy="12" r="10" />
                 </svg>
                 COSMIC CODEX
               </p>
-              <p className="text-[11px] text-[#F0E8D8]/85 leading-relaxed font-sans italic pl-2 border-l-2 border-amber-500/40">
+              <p className="planet-details-footer-text">
                 {planetFacts[selectedPlanet] || "A mysterious and unexplored sector in the outer rim of the Solaris system, carrying primordial secrets."}
               </p>
             </div>

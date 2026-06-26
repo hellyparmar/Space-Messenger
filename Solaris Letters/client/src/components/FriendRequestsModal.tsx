@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { api } from '../lib/api';
 import { useAppStore } from '../store/useAppStore';
@@ -15,7 +15,12 @@ interface FriendRequest {
   sender?: RequestUser;
   target?: RequestUser;
   createdAt: string;
+  status: string;
 }
+
+const AVAILABLE_PLANETS = [
+  'Mercury', 'Venus', 'Earth', 'Mars', 'Jupiter', 'Saturn', 'Uranus', 'Neptune'
+];
 
 function getAvatarHue(str: string) {
   let hash = 0;
@@ -36,13 +41,24 @@ export default function FriendRequestsModal({
   const [outgoing, setOutgoing] = useState<FriendRequest[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const [acceptingRequestId, setAcceptingRequestId] = useState<string | null>(null);
+  const [selectedPlanets, setSelectedPlanets] = useState<Record<string, string>>({});
 
-  const fetchRequests = async () => {
+  const handleFinalize = async (id: string, planetName: string) => {
+    try {
+      await api.post(`/api/friends/request/${id}/finalize`, { planetName });
+      setOutgoing(prev => prev.filter(r => r.id !== id));
+      fetchFriends();
+    } catch (err) {
+      console.error(err);
+    }
+  };
+
+  const fetchRequests = useCallback(async () => {
     setIsLoading(true);
     try {
       const [incRes, outRes] = await Promise.all([
-        api.get<{ requests: any[] }>('/api/friends/requests/incoming'),
-        api.get<{ requests: any[] }>('/api/friends/requests/outgoing'),
+        api.get<{ requests: FriendRequest[] }>('/api/friends/requests/incoming'),
+        api.get<{ requests: FriendRequest[] }>('/api/friends/requests/outgoing'),
       ]);
       setIncoming(incRes.requests || []);
       setOutgoing(outRes.requests || []);
@@ -51,13 +67,13 @@ export default function FriendRequestsModal({
     } finally {
       setIsLoading(false);
     }
-  };
+  }, []);
 
   useEffect(() => {
     if (isOpen) {
-      fetchRequests();
+      Promise.resolve().then(() => fetchRequests());
     }
-  }, [isOpen]);
+  }, [isOpen, fetchRequests]);
 
   const handleDecline = async (id: string) => {
     try {
@@ -121,7 +137,7 @@ export default function FriendRequestsModal({
           style={{
             position: 'relative',
             width: '100%',
-            maxWidth: 560,
+            maxWidth: 'min(90vw, 560px)',
             display: 'flex',
             flexDirection: 'column',
             maxHeight: '80vh',
@@ -374,6 +390,7 @@ export default function FriendRequestsModal({
                   if (!req.target) return null;
                   const target = req.target;
                   const hue = getAvatarHue(target.cosmic_id);
+                  const isAccepted = req.status === 'accepted';
                   return (
                     <motion.div
                       key={req.id}
@@ -411,13 +428,62 @@ export default function FriendRequestsModal({
                       </div>
                       <div style={{ flex: 1, minWidth: 0 }}>
                         <p style={{ color: 'var(--text-primary)', fontSize: 13, fontFamily: "'Exo 2', sans-serif", fontWeight: 600, margin: 0 }}>
-                          {target.display_name}
+                          {isAccepted ? `${target.display_name} accepted your request — assign them a planet` : target.display_name}
                         </p>
                         <p style={{ color: 'var(--text-dim)', fontSize: 10, margin: '2px 0 0', fontFamily: 'monospace' }}>
                           @{target.cosmic_id}
                         </p>
+                        {isAccepted && (
+                          <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 10 }}>
+                            <select
+                              value={selectedPlanets[req.id] || ''}
+                              onChange={e => setSelectedPlanets(prev => ({ ...prev, [req.id]: e.target.value }))}
+                              title="Select destination planet"
+                              style={{
+                                background: '#1c1712',
+                                border: '1px solid rgba(180,140,80,0.3)',
+                                color: 'var(--text-primary)',
+                                fontSize: 11,
+                                padding: '4px 8px',
+                                borderRadius: 2,
+                                fontFamily: 'Orbitron, sans-serif',
+                                outline: 'none',
+                                cursor: 'pointer'
+                              }}
+                            >
+                              <option value="">-- Choose Planet --</option>
+                              {AVAILABLE_PLANETS.map(p => {
+                                const occupant = assignedPlanetsMap[p];
+                                return (
+                                  <option key={p} value={p} disabled={!!occupant}>
+                                    {p} {occupant ? `(occupied by ${occupant})` : ''}
+                                  </option>
+                                );
+                              })}
+                            </select>
+                            <button
+                              disabled={!selectedPlanets[req.id]}
+                              onClick={() => handleFinalize(req.id, selectedPlanets[req.id]!)}
+                              style={{
+                                padding: '5px 12px',
+                                background: selectedPlanets[req.id] ? 'var(--accent-gold)' : 'rgba(200,160,80,0.1)',
+                                border: 'none',
+                                color: selectedPlanets[req.id] ? 'black' : 'rgba(255,255,255,0.3)',
+                                fontFamily: 'Orbitron, sans-serif',
+                                fontSize: 9,
+                                fontWeight: 700,
+                                letterSpacing: 1,
+                                cursor: selectedPlanets[req.id] ? 'pointer' : 'default',
+                                borderRadius: 2,
+                                transition: 'all 0.2s',
+                              }}
+                            >
+                              CONFIRM
+                            </button>
+                          </div>
+                        )}
                       </div>
-                      <div style={{ display: 'flex', gap: 8, flexShrink: 0 }}>
+                      <div style={{ display: 'flex', gap: 8, flexShrink: 0, alignSelf: isAccepted ? 'center' : 'auto' }}>
                         <button
                           onClick={() => handleCancel(req.id)}
                           style={{

@@ -28,6 +28,18 @@ export default function BlackholePanel({ isOpen, onClose }: BlackholePanelProps)
   const [restoring, setRestoring] = useState<string | null>(null);
   const fetchFriends = useAppStore(s => s.fetchFriends);
 
+  const [assigningId, setAssigningId] = useState<string | null>(null);
+  const [selectedPlanets, setSelectedPlanets] = useState<Record<string, string>>({});
+  const assignments = useAppStore(s => s.assignments);
+
+  const occupiedPlanets = new Set(assignments.map(a => a.planetName));
+  const AVAILABLE_PLANETS = [
+    'Mercury', 'Venus', 'Earth', 'Mars',
+    'Jupiter', 'Saturn', 'Uranus', 'Neptune',
+    'Pluto', 'Ceres', 'Eris', 'Haumea', 'Makemake'
+  ];
+  const freePlanets = AVAILABLE_PLANETS.filter(p => !occupiedPlanets.has(p));
+
   const load = useCallback(async () => {
     setLoading(true);
     try {
@@ -41,15 +53,20 @@ export default function BlackholePanel({ isOpen, onClose }: BlackholePanelProps)
   }, []);
 
   useEffect(() => {
-    if (isOpen) load();
+    if (isOpen) {
+      Promise.resolve().then(() => load());
+    }
   }, [isOpen, load]);
 
-  const handleRestore = async (targetId: string) => {
+  const handleRestoreConfirm = async (targetId: string) => {
+    const planetName = selectedPlanets[targetId];
+    if (!planetName) return;
     setRestoring(targetId);
     try {
-      await api.delete(`/api/blackhole/${targetId}`);
+      await api.delete(`/api/blackhole/${targetId}?planetName=${encodeURIComponent(planetName)}`);
       setEntries(prev => prev.filter(e => e.target_id !== targetId));
       await fetchFriends();
+      setAssigningId(null);
     } catch (e) {
       console.error(e);
     } finally {
@@ -77,7 +94,7 @@ export default function BlackholePanel({ isOpen, onClose }: BlackholePanelProps)
             exit={{ scale: 0.9, y: 20 }}
             onClick={e => e.stopPropagation()}
             style={{
-              width: 420, maxHeight: '80vh',
+              width: 'min(90vw, 420px)', maxHeight: '80vh',
               background: 'linear-gradient(160deg, #0d0a05 0%, #100808 50%, #080610 100%)',
               border: '1px solid rgba(180,80,20,0.30)',
               borderRadius: 4,
@@ -97,7 +114,7 @@ export default function BlackholePanel({ isOpen, onClose }: BlackholePanelProps)
                   <h2 style={{
                     fontFamily: 'Orbitron, sans-serif', color: '#FF6030',
                     fontSize: 14, letterSpacing: 4, fontWeight: 700, margin: 0,
-                  }}>⬛ EVENT HORIZON</h2>
+                  }}>EVENT HORIZON</h2>
                   <p style={{
                     color: 'rgba(180,100,60,0.7)', fontSize: 10,
                     letterSpacing: 2, margin: '4px 0 0',
@@ -140,7 +157,6 @@ export default function BlackholePanel({ isOpen, onClose }: BlackholePanelProps)
                   alignItems: 'center', justifyContent: 'center',
                   padding: 48, gap: 12,
                 }}>
-                  <div style={{ fontSize: 36, opacity: 0.3 }}>⬛</div>
                   <p style={{
                     color: 'rgba(180,100,60,0.5)', fontSize: 12,
                     fontStyle: 'italic', fontFamily: "'Exo 2', sans-serif",
@@ -205,22 +221,92 @@ export default function BlackholePanel({ isOpen, onClose }: BlackholePanelProps)
                       </p>
                     </div>
 
-                    {/* Restore button */}
-                    <button
-                      onClick={() => handleRestore(entry.target_id)}
-                      disabled={restoring === entry.target_id}
-                      title="Remove from void"
-                      style={{
-                        background: 'none', border: '1px solid rgba(180,80,20,0.25)',
-                        color: 'rgba(180,100,60,0.6)', cursor: 'pointer',
-                        padding: '4px 8px', borderRadius: 2, fontSize: 9,
-                        fontFamily: 'Orbitron, sans-serif', letterSpacing: 1,
-                        flexShrink: 0, transition: 'all 0.15s',
-                        opacity: restoring === entry.target_id ? 0.4 : 1,
-                      }}
-                    >
-                      {restoring === entry.target_id ? '...' : 'RESTORE'}
-                    </button>
+                    {/* Unblock & Planet Assignment UI */}
+                    {assigningId === entry.target_id ? (
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: 6, width: '100%', maxWidth: 160 }}>
+                        <select
+                          value={selectedPlanets[entry.target_id] || ''}
+                          onChange={e => setSelectedPlanets(prev => ({ ...prev, [entry.target_id]: e.target.value }))}
+                          title="Select destination planet"
+                          style={{
+                            background: '#0d0a05',
+                            border: '1px solid rgba(180,80,20,0.3)',
+                            color: 'rgba(200,120,60,0.9)',
+                            fontSize: 10,
+                            padding: '4px 6px',
+                            borderRadius: 2,
+                            fontFamily: 'Orbitron, sans-serif',
+                            outline: 'none',
+                            cursor: 'pointer',
+                            width: '100%',
+                          }}
+                        >
+                          <option value="">-- Planet --</option>
+                          {freePlanets.map(p => (
+                            <option key={p} value={p}>{p}</option>
+                          ))}
+                        </select>
+                        <div style={{ display: 'flex', gap: 4 }}>
+                          <button
+                            onClick={() => handleRestoreConfirm(entry.target_id)}
+                            disabled={!selectedPlanets[entry.target_id] || restoring === entry.target_id}
+                            style={{
+                              flex: 1,
+                              background: 'rgba(80,180,20,0.1)',
+                              border: '1px solid rgba(80,180,20,0.3)',
+                              color: 'rgba(100,200,60,0.9)',
+                              cursor: 'pointer',
+                              padding: '4px 6px',
+                              borderRadius: 2,
+                              fontSize: 9,
+                              fontFamily: 'Orbitron, sans-serif',
+                              textAlign: 'center',
+                              opacity: (!selectedPlanets[entry.target_id] || restoring === entry.target_id) ? 0.5 : 1,
+                            }}
+                          >
+                            CONFIRM
+                          </button>
+                          <button
+                            onClick={() => setAssigningId(null)}
+                            style={{
+                              flex: 1,
+                              background: 'rgba(180,80,20,0.1)',
+                              border: '1px solid rgba(180,80,20,0.3)',
+                              color: 'rgba(200,120,60,0.9)',
+                              cursor: 'pointer',
+                              padding: '4px 6px',
+                              borderRadius: 2,
+                              fontSize: 9,
+                              fontFamily: 'Orbitron, sans-serif',
+                              textAlign: 'center',
+                            }}
+                          >
+                            CANCEL
+                          </button>
+                        </div>
+                      </div>
+                    ) : (
+                      <button
+                        onClick={() => {
+                          setAssigningId(entry.target_id);
+                          if (freePlanets.length > 0) {
+                            setSelectedPlanets(prev => ({ ...prev, [entry.target_id]: freePlanets[0] }));
+                          }
+                        }}
+                        disabled={restoring === entry.target_id}
+                        title="Bring back from void"
+                        style={{
+                          background: 'none', border: '1px solid rgba(180,80,20,0.25)',
+                          color: 'rgba(180,100,60,0.6)', cursor: 'pointer',
+                          padding: '4px 8px', borderRadius: 2, fontSize: 9,
+                          fontFamily: 'Orbitron, sans-serif', letterSpacing: 1,
+                          flexShrink: 0, transition: 'all 0.15s',
+                          opacity: restoring === entry.target_id ? 0.4 : 1,
+                        }}
+                      >
+                        {restoring === entry.target_id ? '...' : 'RESTORE'}
+                      </button>
+                    )}
                   </motion.div>
                 ))
               )}

@@ -15,7 +15,7 @@ const request = async <T>(path: string, options: RequestInit = {}): Promise<T> =
   // Only attach token on protected routes (not /auth/)
   if (!path.includes('/auth/') && !path.includes('/health')) {
     const { data: { session } } = await supabase.auth.getSession();
-    let token = session?.access_token || localStorage.getItem('cosmimail_token');
+    const token = session?.access_token || localStorage.getItem('cosmimail_token');
     
     if (token) {
       headers['Authorization'] = `Bearer ${token}`;
@@ -24,6 +24,18 @@ const request = async <T>(path: string, options: RequestInit = {}): Promise<T> =
   }
 
   const res = await fetch(`${BASE_URL}${path}`, { ...options, headers });
+
+  if (res.status === 401) {
+    localStorage.removeItem('cosmimail_token');
+    localStorage.removeItem('cosmimail_user');
+    if (
+      !window.location.pathname.includes('/login') &&
+      !window.location.pathname.includes('/register') &&
+      window.location.pathname !== '/'
+    ) {
+      window.location.href = '/login';
+    }
+  }
 
   if (!res.ok) {
     const body = await res.json().catch(() => ({ message: res.statusText }));

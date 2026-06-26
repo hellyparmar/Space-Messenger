@@ -4,6 +4,15 @@ import { authenticate, AuthRequest } from '../middleware/auth';
 
 const router = Router();
 
+function sanitizeInput(text: any, maxLength?: number): string {
+  if (typeof text !== 'string') return '';
+  const stripped = text.replace(/<[^>]*>/g, '');
+  if (maxLength !== undefined) {
+    return stripped.slice(0, maxLength);
+  }
+  return stripped;
+}
+
 // GET /api/blackhole — get all blackholed users for current user
 router.get('/', authenticate, async (req: AuthRequest, res: Response) => {
   try {
@@ -41,21 +50,17 @@ router.post('/', authenticate, async (req: AuthRequest, res: Response) => {
       userId, target.id, target.display_name, target.cosmic_id, reason
     );
 
-    // Also remove friendship + planet assignment
+    // Only remove User A's friendship + planet assignment to targetId
     await prisma.friendship.deleteMany({
       where: {
-        OR: [
-          { user_id: userId, friend_id: targetId },
-          { user_id: targetId, friend_id: userId },
-        ],
+        user_id: userId,
+        friend_id: targetId,
       },
     });
     await prisma.planetAssignment.deleteMany({
       where: {
-        OR: [
-          { user_id: userId, friend_id: targetId },
-          { user_id: targetId, friend_id: userId },
-        ],
+        user_id: userId,
+        friend_id: targetId,
       },
     }).catch(() => {}); // ignore if no assignment
 
@@ -69,11 +74,43 @@ router.post('/', authenticate, async (req: AuthRequest, res: Response) => {
 // DELETE /api/blackhole/:targetId — remove from black hole (unblock)
 router.delete('/:targetId', authenticate, async (req: AuthRequest, res: Response) => {
   try {
+    const userId = req.userId!;
+    const targetId = req.params.targetId as string;
+    const planetName = (req.body.planetName || req.query.planetName) as string;
+
+    if (!planetName) {
+      return res.status(400).json({ message: 'planetName required for restore' });
+    }
+
+    const cleanPlanetName = sanitizeInput(planetName, 50);
+
+    // 1. Remove block
     await prisma.$executeRawUnsafe(
       `DELETE FROM blackhole_entries WHERE user_id = $1 AND target_id = $2`,
-      req.userId, req.params.targetId
+      userId, targetId
     );
-    return res.json({ message: 'Removed from black hole' });
+
+    // 2. Re-create friendships (both directions)
+    await prisma.friendship.upsert({
+      where: { user_id_friend_id: { user_id: userId, friend_id: targetId } },
+      update: {},
+      create: { user_id: userId, friend_id: targetId },
+    });
+
+    await prisma.friendship.upsert({
+      where: { user_id_friend_id: { user_id: targetId, friend_id: userId } },
+      update: {},
+      create: { user_id: targetId, friend_id: userId },
+    });
+
+    // 3. Upsert planet assignment
+    await prisma.planetAssignment.upsert({
+      where: { user_id_friend_id: { user_id: userId, friend_id: targetId } },
+      create: { user_id: userId, friend_id: targetId, planet_name: cleanPlanetName },
+      update: { planet_name: cleanPlanetName }
+    });
+
+    return res.json({ message: 'Removed from black hole and planet assigned' });
   } catch (err) {
     console.error('[blackhole DELETE]', err);
     return res.status(500).json({ message: 'Server error' });

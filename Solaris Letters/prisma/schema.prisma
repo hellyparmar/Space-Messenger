@@ -149,3 +149,17 @@ model GroupMessage {
 
   @@map("group_messages")
 }
+
+// ── Blackhole Entries ────────────────────────────────────────────────────────
+model BlackholeEntry {
+  user_id             String
+  target_id           String
+  target_display_name String
+  target_cosmic_id    String
+  reason              String   @default("removed")
+  created_at          DateTime @default(now())
+
+  @@id([user_id, target_id])
+  @@map("blackhole_entries")
+}
+

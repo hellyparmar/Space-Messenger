@@ -48,7 +48,7 @@ function SpaceBackground() {
 
 // ─── DYNAMIC COSMIC COMETS BACKGROUND ─────────────────────────────────────────
 function Comets() {
-  const count = 12; // Active comet slots
+  const count = 4; // Active comet slots (lowered for a cleaner look)
   const lineRefs = useRef<(THREE.LineSegments | null)[]>([]);
 
   // Pre-generate comet parameters for speed and visual variety
@@ -60,30 +60,34 @@ function Comets() {
         ? new THREE.Color('#ffb300') // Solaris Golden Comet
         : new THREE.Color('#4A9EFF'); // Deep Space Ice Blue Comet
 
+      const length = 40 + Math.random() * 60; // Sleeker, shorter initial length
+
       data.push({
         position: new THREE.Vector3(),
         direction: new THREE.Vector3(),
-        speed: 100 + Math.random() * 120, // Graceful slower speed
-        length: 40 + Math.random() * 60, // Sleeker, shorter initial length
-        active: false,
+        speed: 50 + Math.random() * 60, // Slower graceful speed
+        length: length,
+        initialLength: length,
+        state: 'idle' as 'idle' | 'flying' | 'fading',
         timer: Math.random() * 8, // staggered initial start times
         width: 0.8 + Math.random() * 1.0, // Thinner, more elegant trail
         color: baseColor,
+        fadeDuration: 1.0,
       });
     }
     return data;
-  }, []);
+  }, [count]);
 
   useFrame((_state, delta) => {
     cometsData.forEach((comet, idx) => {
       const line = lineRefs.current[idx];
       if (!line) return;
 
-      if (!comet.active) {
+      if (comet.state === 'idle') {
         comet.timer -= delta;
         if (comet.timer <= 0) {
           // Re-spawn the comet in the outer system
-          comet.active = true;
+          comet.state = 'flying';
           
           // Random point on a distant hemisphere facing the solar system
           const angle = Math.random() * Math.PI * 2;
@@ -101,21 +105,46 @@ function Comets() {
             -Math.sin(angle) + (Math.random() - 0.5) * 0.4
           ).normalize();
 
-          comet.speed = 100 + Math.random() * 120; // Graceful slower speed
-          comet.length = 50 + Math.random() * 80; // Sleeker, shorter active length
-          comet.timer = 12 + Math.random() * 15; // lifetime / next spawn delay
+          comet.speed = 50 + Math.random() * 60; // Slower graceful speed
+          const length = 50 + Math.random() * 80;
+          comet.length = length;
+          comet.initialLength = length;
+          comet.fadeDuration = 0.8 + Math.random() * 0.8;
         }
         line.visible = false;
       } else {
         // Move the comet
         comet.position.addScaledVector(comet.direction, comet.speed * delta);
 
-        // Deactivate if it travels too far out
+        // Check if we should trigger fadeout
+        if (comet.state === 'flying' && comet.position.length() > 4000) {
+          comet.state = 'fading';
+        }
+
+        // Fade logic: shrink the tail towards the head, and fade the opacity
+        if (comet.state === 'fading') {
+          comet.length -= (comet.initialLength / comet.fadeDuration) * delta;
+          if (comet.length <= 0) {
+            comet.length = 0;
+            comet.state = 'idle';
+            comet.timer = 5 + Math.random() * 10; // delay before next flight
+          }
+        }
+
+        // Hard boundary safety check
         if (comet.position.length() > 6000) {
-          comet.active = false;
-          comet.timer = 4 + Math.random() * 8; // delay before next flight
-        } else {
+          comet.state = 'idle';
+          comet.timer = 5 + Math.random() * 10;
+        }
+
+        if (comet.state !== 'idle') {
           line.visible = true;
+
+          // Set opacity proportional to current length
+          const opacityRatio = comet.initialLength > 0 ? (comet.length / comet.initialLength) : 0;
+          if (line.material) {
+            (line.material as THREE.LineBasicMaterial).opacity = opacityRatio * 0.85;
+          }
 
           // Update the line coordinates for the fading trail
           const positions = line.geometry.attributes.position.array as Float32Array;
@@ -132,6 +161,8 @@ function Comets() {
           positions[5] = tailPos.z;
 
           line.geometry.attributes.position.needsUpdate = true;
+        } else {
+          line.visible = false;
         }
       }
     });
@@ -492,17 +523,50 @@ function InterstellarBlackHole() {
         </mesh>
       </group>
 
-      {/* ── 3. Event horizon sphere — pure black, writes depth, occludes disc ── */}
-      {/* Clickable — opens blackhole panel showing deleted/blocked users */}
+      {/* ── 3a. Event horizon solid core ── */}
       <mesh
         position={P}
         renderOrder={2}
+      >
+        <sphereGeometry args={[R * 0.88, 64, 64]} />
+        <meshBasicMaterial color="#000000" depthWrite={true} />
+      </mesh>
+
+      {/* ── 3b. Event horizon soft blend layer (Fresnel falloff) ── */}
+      <mesh
+        position={P}
+        renderOrder={3}
         onClick={e => { e.stopPropagation(); setBlackholeOpen(true); }}
         onPointerOver={() => { document.body.style.cursor = 'pointer'; }}
         onPointerOut={() => { document.body.style.cursor = 'default'; }}
       >
-        <sphereGeometry args={[R * 1.01, 96, 96]} />
-        <meshBasicMaterial color="#000000" depthWrite={true} />
+        <sphereGeometry args={[R * 1.15, 96, 96]} />
+        <shaderMaterial
+          vertexShader={`
+            varying vec3 vNormal;
+            varying vec3 vViewPosition;
+            void main() {
+              vec4 mvPosition = modelViewMatrix * vec4(position, 1.0);
+              vNormal = normalize(normalMatrix * normal);
+              vViewPosition = -mvPosition.xyz;
+              gl_Position = projectionMatrix * mvPosition;
+            }
+          `}
+          fragmentShader={`
+            varying vec3 vNormal;
+            varying vec3 vViewPosition;
+            void main() {
+              vec3 normal = normalize(vNormal);
+              vec3 viewDir = normalize(vViewPosition);
+              float dotProduct = max(dot(normal, viewDir), 0.0);
+              // Pow 2.5 creates a wide, smooth shadow transition fading to transparent at the edges
+              float opacity = pow(dotProduct, 2.5);
+              gl_FragColor = vec4(vec3(0.0), opacity);
+            }
+          `}
+          transparent={true}
+          depthWrite={false}
+        />
       </mesh>
 
 
@@ -542,14 +606,6 @@ const DECORATIVE_BLACK_HOLES = [
     radius: 15,
     rotationSpeed: 0.06,
     tilt: [Math.PI * -0.08, 0.15, -0.12] as [number, number, number]
-  },
-  {
-    id: 'dbh-3',
-    position: [3500, -400, 4500] as [number, number, number],
-    color: '#FFEEAA',
-    radius: 20,
-    rotationSpeed: 0.03,
-    tilt: [Math.PI * 0.05, -0.22, 0.05] as [number, number, number]
   },
   {
     id: 'dbh-4',
@@ -931,200 +987,7 @@ function StarCluster({ position }: { position: [number, number, number] }) {
   );
 }
 
-// ─── MILKY WAY DUST LANES (particle-only, no line geometry) ─────────────────
-function GalaxyDustLanes({ offsetX = 0 }: { offsetX?: number }) {
-  const dustRef = useRef<THREE.Points>(null!);
 
-  const { pos, col } = useMemo(() => {
-    const COUNT = 22000;
-    const pos = new Float32Array(COUNT * 3);
-    const col = new Float32Array(COUNT * 3);
-    let idx = 0;
-    const ARM_PAIRS = 2;
-    for (let i = 0; i < COUNT * 4 && idx < COUNT; i++) {
-      const arm    = i % ARM_PAIRS;
-      const t      = 0.1 + Math.pow(Math.random(), 1.2) * 0.82;
-      // Offset between spiral arms — dust lanes sit between them
-      const baseAng = arm * Math.PI + Math.PI / ARM_PAIRS;
-      const wind    = t * Math.PI * 3.0;
-      const theta   = baseAng + wind;
-      const r       = 200 + t * 5200;
-      const scatter = 90 + t * 380;
-      const rOff    = (Math.random() - 0.5) * scatter;
-      // Realistic 3D thickness: thin disc
-      const yMax    = t < 0.15 ? r * 0.18 : t < 0.4 ? 60 - t * 110 : 15 + Math.random() * 10;
-      const yOff    = (Math.random() - 0.5) * Math.max(5, yMax);
-
-      pos[idx*3]   = Math.cos(theta) * (r + rOff) + offsetX;
-      pos[idx*3+1] = yOff;
-      pos[idx*3+2] = Math.sin(theta) * (r + rOff);
-
-      // Dark brownish-amber dust color (absorbs light — rendered dim)
-      const tone = 0.3 + Math.random() * 0.15;
-      col[idx*3]   = tone * 0.9;
-      col[idx*3+1] = tone * 0.55;
-      col[idx*3+2] = tone * 0.18;
-      idx++;
-    }
-    return { pos: pos.slice(0, idx * 3), col: col.slice(0, idx * 3) };
-  }, [offsetX]);
-
-  const dustTex = useMemo(() => {
-    const c = document.createElement('canvas'); c.width = c.height = 64;
-    const ctx = c.getContext('2d')!;
-    const g = ctx.createRadialGradient(32,32,0,32,32,32);
-    g.addColorStop(0,   'rgba(255,200,80,0.9)');
-    g.addColorStop(0.3, 'rgba(255,160,40,0.4)');
-    g.addColorStop(1,   'rgba(0,0,0,0)');
-    ctx.fillStyle = g; ctx.fillRect(0,0,64,64);
-    return new THREE.CanvasTexture(c);
-  }, []);
-
-  useFrame(({ camera }) => {
-    const op = THREE.MathUtils.smoothstep(camera.position.length(), 2000, 5500);
-    if (dustRef.current) (dustRef.current.material as THREE.PointsMaterial).opacity = op * 0.18;
-  });
-
-  const count = pos.length / 3;
-
-  return (
-    <points ref={dustRef}>
-      <bufferGeometry>
-        <bufferAttribute attach="attributes-position" args={[pos, 3]} count={count} array={pos} itemSize={3} />
-        <bufferAttribute attach="attributes-color"    args={[col, 3]} count={count} array={col} itemSize={3} />
-      </bufferGeometry>
-      <pointsMaterial size={1.5} vertexColors transparent opacity={0}
-        blending={THREE.AdditiveBlending} sizeAttenuation depthWrite={false}
-        map={dustTex} alphaTest={0.001} />
-    </points>
-  );
-}
-
-// ─── MILKY WAY VOLUMETRIC HAZE DISK (dense 3D gas/dust clouds) ──────────────
-interface VolumetricHazeDiskProps {
-  offsetX?: number;
-  offsetY?: number;
-  scaleY?: number;
-  rotation?: number;
-  opacityMultiplier?: number;
-  count?: number;
-  size?: number;
-  colorShift?: number;
-}
-
-function VolumetricHazeDisk({
-  offsetX = 0,
-  offsetY = 0,
-  scaleY = 1.0,
-  rotation = 0,
-  opacityMultiplier = 1.0,
-  count = 200000,
-  size = 46,
-  colorShift = 0.0
-}: VolumetricHazeDiskProps) {
-  const hazeRef = useRef<THREE.Points>(null!);
-
-  const { pos, col } = useMemo(() => {
-    const pos = new Float32Array(count * 3);
-    const col = new Float32Array(count * 3);
-
-    for (let i = 0; i < count; i++) {
-      // Expanded annular distribution spanning from core to outer arms
-      const r = 400 + Math.pow(Math.random(), 0.85) * 8200;
-      // Rotation creates natural swirling offsets between stacked disks
-      const theta = Math.random() * Math.PI * 2 + rotation;
-
-      // Volumetric thickness: thicker near bulge/core, tapering out
-      const ySpread = Math.max(15, 185 - (r / 8600) * 155) * scaleY;
-      const yOff = (Math.random() - 0.5) * ySpread * 2 + offsetY;
-
-      pos[i * 3]     = Math.cos(theta) * r + offsetX;
-      pos[i * 3 + 1] = yOff;
-      pos[i * 3 + 2] = Math.sin(theta) * r;
-
-      // Stunning, realistic rich indigo, deep blue, violet, and ionized teal gradient
-      const normR = (r - 400) / 8200; // 0..1
-      let baseR = 0.15;
-      let baseG = 0.08;
-      let baseB = 0.85;
-
-      const isTeal = Math.random() < 0.12 && normR > 0.28 && normR < 0.72;
-
-      if (isTeal) {
-        // Ionized oxygen OIII pockets (vibrant cyan-teal)
-        baseR = 0.05;
-        baseG = 0.85;
-        baseB = 0.80;
-      } else if (normR < 0.35) {
-        // Inner disk: glowing deep purple/indigo/magenta
-        baseR = 0.38 + (0.35 - normR) * 0.25;
-        baseG = 0.08;
-        baseB = 0.98;
-      } else if (normR < 0.75) {
-        // Mid disk: brilliant blue/violet haze
-        baseR = 0.14;
-        baseG = 0.20 + (0.75 - normR) * 0.14;
-        baseB = 0.98;
-      } else {
-        // Outer disk: dark, faint space blue gas
-        baseR = 0.05;
-        baseG = 0.10;
-        baseB = 0.75;
-      }
-
-      // Apply colorShift to create distinct warm/cool temperature layers
-      if (colorShift !== 0) {
-        baseR = Math.max(0, Math.min(1, baseR + colorShift * 0.15));
-        baseB = Math.max(0, Math.min(1, baseB - colorShift * 0.15));
-      }
-
-      // Add a bit of natural variance so the cloud colors look organic
-      col[i * 3]     = Math.max(0, Math.min(1, baseR + (Math.random() - 0.5) * 0.05));
-      col[i * 3 + 1] = Math.max(0, Math.min(1, baseG + (Math.random() - 0.5) * 0.05));
-      col[i * 3 + 2] = Math.max(0, Math.min(1, baseB + (Math.random() - 0.5) * 0.05));
-    }
-    return { pos, col };
-  }, [offsetX, offsetY, scaleY, rotation, count, colorShift]);
-
-  const hazeTex = useMemo(() => {
-    const c = document.createElement('canvas'); c.width = c.height = 128;
-    const ctx = c.getContext('2d')!;
-    const g = ctx.createRadialGradient(64,64,0, 64,64,64);
-    g.addColorStop(0,   'rgba(255,255,255,1.0)');
-    g.addColorStop(0.15, 'rgba(255,255,255,0.85)');
-    g.addColorStop(0.4,  'rgba(255,255,255,0.45)');
-    g.addColorStop(0.7,  'rgba(255,255,255,0.12)');
-    g.addColorStop(1,   'rgba(0,0,0,0)');
-    ctx.fillStyle = g; ctx.fillRect(0,0,128,128);
-    return new THREE.CanvasTexture(c);
-  }, []);
-
-  useFrame(({ camera }) => {
-    const op = THREE.MathUtils.smoothstep(camera.position.length(), 2000, 5500);
-    // Layered, extremely rich and dense volumetric haze glow
-    if (hazeRef.current) (hazeRef.current.material as THREE.PointsMaterial).opacity = op * 0.165 * opacityMultiplier;
-  });
-
-  return (
-    <points ref={hazeRef}>
-      <bufferGeometry>
-        <bufferAttribute attach="attributes-position" args={[pos, 3]} count={count} array={pos} itemSize={3} />
-        <bufferAttribute attach="attributes-color"    args={[col, 3]} count={count} array={col} itemSize={3} />
-      </bufferGeometry>
-      <pointsMaterial 
-        size={size} 
-        vertexColors 
-        transparent 
-        opacity={0}
-        blending={THREE.AdditiveBlending} 
-        sizeAttenuation 
-        depthWrite={false}
-        map={hazeTex} 
-        alphaTest={0.001} 
-      />
-    </points>
-  );
-}
 
 function DistantGalaxySprite({ position, innerColor, outerColor, scale, scaleY = 0.5, minDist = 1500 }: any) {
   const texture = useMemo(() => {
@@ -1531,529 +1394,185 @@ const GLOBULAR_CLUSTERS: Array<{ position:[number,number,number]; radius:number 
   { position: [-22000, -6000,  2000],  radius: 95  },
 ];
 
-interface Volumetric3DGalaxyGasProps {
-  baseAngle: number;
-  color: string;
-  opacityRef: React.MutableRefObject<number>;
-  size: number;
-}
 
-function Volumetric3DGalaxyGas({ baseAngle, color, opacityRef, size }: Volumetric3DGalaxyGasProps) {
-  const pointsRef = useRef<THREE.Points>(null!);
-  
-  const { pos, col, count } = useMemo(() => {
-    const COUNT = 32000;
-    const pos = new Float32Array(COUNT * 3);
-    const col = new Float32Array(COUNT * 3);
-    const baseColor = new THREE.Color(color);
-    
-    for (let i = 0; i < COUNT; i++) {
-      const t = Math.pow(Math.random(), 0.9);
-      const wind = t * Math.PI * 3.4;
-      
-      const theta = baseAngle + wind + (Math.random() - 0.5) * (0.32 + (1 - t) * 0.25);
-      const r = 180 + t * 5600;
-      
-      const ySpread = Math.max(15, 230 * (1 - t)); 
-      const yOff = (Math.random() - 0.5) * ySpread;
-      
-      const scatter = 60 + t * 650;
-      const rOff = (Math.random() - 0.5) * scatter;
-      
-      pos[i * 3]     = Math.cos(theta) * (r + rOff);
-      pos[i * 3 + 1] = yOff;
-      pos[i * 3 + 2] = Math.sin(theta) * (r + rOff);
-      
-      const c = baseColor.clone().multiplyScalar(0.85 + Math.random() * 0.3);
-      col[i * 3]     = c.r;
-      col[i * 3 + 1] = c.g;
-      col[i * 3 + 2] = c.b;
-    }
-    return { pos, col, count: COUNT };
-  }, [baseAngle, color]);
-
-  const gasTex = useMemo(() => {
-    const c = document.createElement('canvas'); c.width = c.height = 128;
-    const ctx = c.getContext('2d')!;
-    const g = ctx.createRadialGradient(64,64,0, 64,64,64);
-    g.addColorStop(0,   'rgba(255,255,255,1.0)');
-    g.addColorStop(0.2, 'rgba(255,255,255,0.72)');
-    g.addColorStop(0.5, 'rgba(255,255,255,0.22)');
-    g.addColorStop(0.8, 'rgba(255,255,255,0.05)');
-    g.addColorStop(1,   'rgba(0,0,0,0)');
-    ctx.fillStyle = g; ctx.fillRect(0,0,128,128);
-    const tex = new THREE.CanvasTexture(c);
-    tex.colorSpace = THREE.SRGBColorSpace;
-    return tex;
-  }, []);
-
-  useFrame(() => {
-    if (pointsRef.current) {
-      (pointsRef.current.material as THREE.PointsMaterial).opacity = opacityRef.current;
-    }
-  });
-
-  return (
-    <points ref={pointsRef}>
-      <bufferGeometry>
-        <bufferAttribute attach="attributes-position" args={[pos, 3]} count={count} array={pos} itemSize={3} />
-        <bufferAttribute attach="attributes-color"    args={[col, 3]} count={count} array={col} itemSize={3} />
-      </bufferGeometry>
-      <pointsMaterial 
-        size={size} 
-        vertexColors 
-        transparent 
-        blending={THREE.AdditiveBlending} 
-        sizeAttenuation 
-        depthWrite={false} 
-        map={gasTex} 
-        alphaTest={0.001} 
-      />
-    </points>
-  );
-}
-
-interface Volumetric3DCoreGasProps {
-  opacityRef: React.MutableRefObject<number>;
-}
-
-function Volumetric3DCoreGas({ opacityRef }: Volumetric3DCoreGasProps) {
-  const pointsRef = useRef<THREE.Points>(null!);
-  
-  const { pos, col, count } = useMemo(() => {
-    const COUNT = 16000;
-    const pos = new Float32Array(COUNT * 3);
-    const col = new Float32Array(COUNT * 3);
-    
-    for (let i = 0; i < COUNT; i++) {
-      const r = Math.pow(Math.random(), 1.4) * 1300;
-      const th = Math.random() * Math.PI * 2;
-      const ySpread = r < 200 ? r * 0.55 : Math.max(15, r * 0.22);
-      const yOff = (Math.random() - 0.5) * ySpread * 2;
-      
-      pos[i * 3]     = Math.cos(th) * r;
-      pos[i * 3 + 1] = yOff;
-      pos[i * 3 + 2] = Math.sin(th) * r;
-      
-      const roll = Math.random();
-      if (roll < 0.45) {
-        col[i * 3] = 1.0; col[i * 3 + 1] = 0.90; col[i * 3 + 2] = 0.72;
-      } else if (roll < 0.8) {
-        col[i * 3] = 1.0; col[i * 3 + 1] = 0.72; col[i * 3 + 2] = 0.35;
-      } else {
-        col[i * 3] = 1.0; col[i * 3 + 1] = 0.52; col[i * 3 + 2] = 0.18;
-      }
-    }
-    return { pos, col, count: COUNT };
-  }, []);
-
-  const coreTex = useMemo(() => {
-    const c = document.createElement('canvas'); c.width = c.height = 64;
-    const ctx = c.getContext('2d')!;
-    const g = ctx.createRadialGradient(32,32,0, 32,32,32);
-    g.addColorStop(0,   'rgba(255,255,255,1.0)');
-    g.addColorStop(0.3, 'rgba(255,225,170,0.52)');
-    g.addColorStop(0.7, 'rgba(255,170,70,0.15)');
-    g.addColorStop(1,   'rgba(0,0,0,0)');
-    ctx.fillStyle = g; ctx.fillRect(0,0,64,64);
-    const tex = new THREE.CanvasTexture(c);
-    tex.colorSpace = THREE.SRGBColorSpace;
-    return tex;
-  }, []);
-
-  useFrame(() => {
-    if (pointsRef.current) {
-      (pointsRef.current.material as THREE.PointsMaterial).opacity = opacityRef.current * 1.25;
-    }
-  });
-
-  return (
-    <points ref={pointsRef}>
-      <bufferGeometry>
-        <bufferAttribute attach="attributes-position" args={[pos, 3]} count={count} array={pos} itemSize={3} />
-        <bufferAttribute attach="attributes-color"    args={[col, 3]} count={count} array={col} itemSize={3} />
-      </bufferGeometry>
-      <pointsMaterial 
-        size={85} 
-        vertexColors 
-        transparent 
-        blending={THREE.AdditiveBlending} 
-        sizeAttenuation 
-        depthWrite={false} 
-        map={coreTex} 
-        alphaTest={0.001} 
-      />
-    </points>
-  );
-}
 
 function DeepSpaceLayers() {
-  // Refs
-  const arm1Ref   = useRef<THREE.Points>(null!);
-  const arm2Ref   = useRef<THREE.Points>(null!);
-  const coreRef   = useRef<THREE.Points>(null!);
-  const haloRef   = useRef<THREE.Points>(null!);
-  const groupRef  = useRef<THREE.Group>(null!);
-  const bulgeRef  = useRef<THREE.Sprite>(null!);
-  const outerRef  = useRef<THREE.Sprite>(null!);
-
-  // Volumetric Core Sphere material refs
-  const coreSphereRef1 = useRef<THREE.MeshBasicMaterial>(null!);
-  const coreSphereRef2 = useRef<THREE.MeshBasicMaterial>(null!);
-  const coreSphereRef3 = useRef<THREE.MeshBasicMaterial>(null!);
-  const gasOpRef = useRef<number>(0);
-
-
-
-  // ── Soft star particle texture ──────────────────────────────────────────
-  const starTex = useMemo(() => {
-    const c = document.createElement('canvas'); c.width = c.height = 64;
-    const ctx = c.getContext('2d')!;
-    const g = ctx.createRadialGradient(32,32,0,32,32,32);
-    g.addColorStop(0,   'rgba(255,255,255,1)');
-    g.addColorStop(0.1, 'rgba(255,255,255,0.9)');
-    g.addColorStop(0.35,'rgba(255,255,255,0.35)');
-    g.addColorStop(0.7, 'rgba(255,255,255,0.07)');
-    g.addColorStop(1,   'rgba(0,0,0,0)');
-    ctx.fillStyle = g; ctx.fillRect(0,0,64,64);
-    return new THREE.CanvasTexture(c);
-  }, []);
-
-  // ── Central bulge glow (CHANGE 5) ──────────────────────────────────────
-  const bulgeTex = useMemo(() => {
-    const c = document.createElement('canvas'); c.width = c.height = 512;
-    const ctx = c.getContext('2d')!;
-    const g = ctx.createRadialGradient(256,256,0,256,256,256);
-    g.addColorStop(0,    'rgba(255,255,255,1)');
-    g.addColorStop(0.05, 'rgba(255,252,230,1)');
-    g.addColorStop(0.15, 'rgba(255,235,150,0.9)');
-    g.addColorStop(0.32, 'rgba(255,200,80,0.55)');
-    g.addColorStop(0.55, 'rgba(200,130,30,0.18)');
-    g.addColorStop(0.8,  'rgba(80,40,0,0.05)');
-    g.addColorStop(1,    'rgba(0,0,0,0)');
-    ctx.fillStyle = g; ctx.fillRect(0,0,512,512);
-    return new THREE.CanvasTexture(c);
-  }, []);
-
-  // ── Outer disc haze ────────────────────────────────────────────────────
-  const outerTex = useMemo(() => {
-    const c = document.createElement('canvas'); c.width = c.height = 512;
-    const ctx = c.getContext('2d')!;
-    const g = ctx.createRadialGradient(256,256,30,256,256,256);
-    g.addColorStop(0,    'rgba(60,30,120,0)');
-    g.addColorStop(0.3,  'rgba(40,20,100,0.35)');
-    g.addColorStop(0.6,  'rgba(20,10,70,0.45)');
-    g.addColorStop(0.85, 'rgba(8,4,40,0.15)');
-    g.addColorStop(1,    'rgba(0,0,0,0)');
-    ctx.fillStyle = g; ctx.fillRect(0,0,512,512);
-    return new THREE.CanvasTexture(c);
-  }, []);
-
-  // ── Galaxy particle data ────────────────────────────────────────────────
-  const gData = useMemo(() => {
-    const OX = -2750;
-    const ARM_MAX  = 220000;
-    const CORE_MAX = 55000;
-    const HALO_MAX = 14000;
-
-    // Pre-allocate at max, we'll compact by skipping inter-arm voids
-    const a1pBuf = new Float32Array(ARM_MAX * 3); const a1cBuf = new Float32Array(ARM_MAX * 3);
-    const a2pBuf = new Float32Array(ARM_MAX * 3); const a2cBuf = new Float32Array(ARM_MAX * 3);
-    const cpBuf  = new Float32Array(CORE_MAX * 3); const ccBuf  = new Float32Array(CORE_MAX * 3);
-    const hpBuf  = new Float32Array(HALO_MAX * 3);
-
-    // ── REALISTIC STAR COLORS (CHANGE 2) ──────────────────────────────
-    // Returns [r,g,b] 0-1 based on stellar type and arm position
-    const starColor = (t: number, isCore: boolean): [number,number,number] => {
-      if (isCore) {
-        // Core dominated by warm yellow-white and orange (older stars)
-        const roll = Math.random();
-        if (roll < 0.45) return [1.0, 0.96, 0.85];       // warm white #FFF5E0
-        if (roll < 0.75) return [1.0, 0.82, 0.50];       // yellow-orange #FFD080
-        return [1.0, 0.53, 0.27];                          // orange-red #FF8844
-      }
-      // Arms: bluer stars as we go outward
-      const outerBias = Math.pow(t, 0.8);
-      const roll = Math.random();
-      if (roll < 0.35 * outerBias + 0.05) {
-        // Blue-white young hot stars (#A8CCFF)
-        return [0.66, 0.80, 1.0];
-      } else if (roll < 0.75) {
-        // Warm white main sequence (#FFF5E0)
-        return [1.0, 0.96, 0.88];
-      } else if (roll < 0.90) {
-        // Yellow-orange older stars (#FFD080)
-        return [1.0, 0.82, 0.50];
-      } else {
-        // Orange-red giants (#FF8844)
-        return [1.0, 0.53, 0.27];
-      }
-    };
-
-    // ── Arm distance from nearest arm centerline ───────────────────────
-    // Used for CHANGE 4: dust lane probability
-    const distToNearestArm = (theta: number, r: number): number => {
-      let minDist = Infinity;
-      for (let a = 0; a < 2; a++) {
-        const baseAng = a * Math.PI;
-        const t = Math.max(0, Math.min(1, (r - 180) / 5600));
-        const armTheta = baseAng + t * Math.PI * 3.4;
-        // Angular distance (wrapped)
-        let dTheta = Math.abs(theta - armTheta) % (Math.PI * 2);
-        if (dTheta > Math.PI) dTheta = Math.PI * 2 - dTheta;
-        minDist = Math.min(minDist, dTheta * r); // arc length ≈ r * dTheta
-      }
-      return minDist;
-    };
-
-    // ── Fill one spiral arm ────────────────────────────────────────────
-    const fillArm = (
-      pos: Float32Array, col: Float32Array, baseAngle: number
-    ): number => {
-      let idx = 0;
-      let attempts = 0;
-      const maxAttempts = ARM_MAX * 3;
-      while (idx < ARM_MAX && attempts < maxAttempts) {
-        attempts++;
-        const t     = Math.pow(Math.random(), 1.1);
-        const wind  = t * Math.PI * 3.4;
-        
-        // Add natural swirling noise/angular dispersion
-        const theta = baseAngle + wind + (Math.random() - 0.5) * (0.32 + (1 - t) * 0.25);
-        const r     = 180 + t * 5600;
-
-        // Arm distance from nearest arm centerline
-        const armDist = distToNearestArm(theta, r);
-        const armWidthThreshold = 380 + t * 1100; // Wider outward
-        if (armDist > armWidthThreshold && Math.random() < 0.65) continue;
-
-        // Arm width: fluffy near core, beautifully flaring outward
-        const width  = 60 + t * 650;
-        const rOff   = (Math.random() - 0.5) * width * (0.4 + Math.random() * 0.6);
-
-        // Realistic 3D thickness (lens shape)
-        let ySpread: number;
-        const normR = r / 5780; // 0..1
-        if (normR < 0.15) {
-          ySpread = r * 0.35;                     // bulge region
-        } else if (normR < 0.4) {
-          ySpread = 200 - (normR - 0.15) / 0.25 * 160;
-        } else {
-          ySpread = 15 + Math.random() * 10;
-        }
-        const yOff = (Math.random() - 0.5) * ySpread * 2;
-
-        pos[idx*3]   = Math.cos(theta) * (r + rOff) + OX;
-        pos[idx*3+1] = yOff;
-        pos[idx*3+2] = Math.sin(theta) * (r + rOff);
-
-        const [cr, cg, cb] = starColor(t, false);
-        col[idx*3] = cr; col[idx*3+1] = cg; col[idx*3+2] = cb;
-        idx++;
-      }
-      return idx;
-    };
-
-    const a1Count = fillArm(a1pBuf, a1cBuf, 0);
-    const a2Count = fillArm(a2pBuf, a2cBuf, Math.PI);
-
-    // ── Dense core: power-law distribution with golden bulge ──────────
-    let coreCount = 0;
-    for (let i = 0; i < CORE_MAX; i++) {
-      const r  = Math.pow(Math.random(), 2.0) * 1100;
-      const th = Math.random() * Math.PI * 2;
-      // CHANGE 3: Bulge thickness ±35% of r
-      const ySpread = r < 0.15 * 1100 ? r * 0.35 : Math.max(8, r * 0.12);
-      cpBuf[i*3]   = Math.cos(th) * r + OX;
-      cpBuf[i*3+1] = (Math.random() - 0.5) * ySpread * 2;
-      cpBuf[i*3+2] = Math.sin(th) * r;
-      const [cr, cg, cb] = starColor(r/1100, true);
-      ccBuf[i*3] = cr; ccBuf[i*3+1] = cg; ccBuf[i*3+2] = cb;
-      coreCount++;
-    }
-
-    // ── Old halo stars (spheroidal, warm-white to red) ─────────────────
-    for (let i = 0; i < HALO_MAX; i++) {
-      const r   = 700 + Math.pow(Math.random(), 1.8) * 10000;
-      const th  = Math.random() * Math.PI * 2;
-      const phi = Math.acos(2 * Math.random() - 1);
-      hpBuf[i*3]   = Math.sin(phi)*Math.cos(th)*r + OX;
-      hpBuf[i*3+1] = Math.cos(phi)*r * 0.12;
-      hpBuf[i*3+2] = Math.sin(phi)*Math.sin(th)*r;
-    }
-
-    return {
-      a1p: a1pBuf.slice(0, a1Count*3), a1c: a1cBuf.slice(0, a1Count*3), a1Count,
-      a2p: a2pBuf.slice(0, a2Count*3), a2c: a2cBuf.slice(0, a2Count*3), a2Count,
-      cp: cpBuf.slice(0, coreCount*3), cc: ccBuf.slice(0, coreCount*3), coreCount,
-      hp: hpBuf, haloCount: HALO_MAX,
-    };
-  }, []);
-
-  useFrame(({ camera }) => {
-    const dist = camera.position.length();
-    const op   = THREE.MathUtils.smoothstep(dist, 2000, 5500);
-
-    const setOp = (ref: React.RefObject<THREE.Points>, v: number) => {
-      if (ref.current) (ref.current.material as THREE.PointsMaterial).opacity = v;
-    };
-    setOp(arm1Ref, op * 0.85);
-    setOp(arm2Ref, op * 0.85);
-    setOp(coreRef, op * 0.95);
-    setOp(haloRef, op * 0.08);
-
-    if (bulgeRef.current)  bulgeRef.current.material.opacity  = op * 0.45; // CHANGE 5
-    if (outerRef.current)  outerRef.current.material.opacity  = op * 0.38;
-
-    // Volumetric 3D Core Sphere opacity controls
-    if (coreSphereRef1.current) coreSphereRef1.current.opacity = op * 0.75;
-    if (coreSphereRef2.current) coreSphereRef2.current.opacity = op * 0.40;
-    if (coreSphereRef3.current) coreSphereRef3.current.opacity = op * 0.18;
-    gasOpRef.current = op * 0.85;
-
-    if (groupRef.current)  groupRef.current.rotation.y += 0.000018;
-  });
-
   const SC   = 15;
   const OX_S = -2750 * SC;
 
+  const galaxyRef = useRef<THREE.Group>(null!);
+
+  const { coreData, armData, haloData } = useMemo(() => {
+    // Object 1 — Core: 8,000 points. Distribute using random spherical coordinates with radius 0 to 1.5 units,
+    // Y values multiplied by 0.35 to flatten. Colors warm white #fff8ee near center fading to amber #ffaa33 at edges.
+    const coreCount = 8000;
+    const corePos = new Float32Array(coreCount * 3);
+    const coreCol = new Float32Array(coreCount * 3);
+    const cCore = new THREE.Color('#fff8ee');
+    const cAmber = new THREE.Color('#ffaa33');
+
+    for (let i = 0; i < coreCount; i++) {
+      const u = Math.random();
+      const theta = Math.random() * Math.PI * 2;
+      const phi = Math.acos(2 * Math.random() - 1);
+      
+      const r = Math.pow(u, 1.5) * 1.5;
+
+      const x = r * Math.sin(phi) * Math.cos(theta);
+      const y = r * Math.cos(phi) * 0.35;
+      const z = r * Math.sin(phi) * Math.sin(theta);
+
+      corePos[i * 3]     = x;
+      corePos[i * 3 + 1] = y;
+      corePos[i * 3 + 2] = z;
+
+      const factor = r / 1.5;
+      const col = cCore.clone().lerp(cAmber, factor);
+      coreCol[i * 3]     = col.r;
+      coreCol[i * 3 + 1] = col.g;
+      coreCol[i * 3 + 2] = col.b;
+    }
+
+    // Object 2 — Spiral arms: 35,000 points across 4 arms. For each point pick random distance r between 2 and 16.
+    // Angle equals r * 0.45 + (armIndex * Math.PI * 0.5).
+    // X equals r * cos(angle) + random scatter * 0.6.
+    // Z equals r * sin(angle) + random scatter * 0.6.
+    // Y equals (Math.random() - 0.5) * 0.3.
+    // Colors: inner #aabbff, mid #ffffff, outer #7799ff.
+    const armCount = 35000;
+    const armPos = new Float32Array(armCount * 3);
+    const armCol = new Float32Array(armCount * 3);
+    const cInner = new THREE.Color('#aabbff');
+    const cMid = new THREE.Color('#ffffff');
+    const cOuter = new THREE.Color('#7799ff');
+
+    for (let i = 0; i < armCount; i++) {
+      const armIndex = i % 4;
+      const r = 2.0 + Math.random() * 14.0;
+      const angle = r * 0.45 + (armIndex * Math.PI * 0.5);
+
+      const scatterX = (Math.random() - 0.5) * 2;
+      const scatterZ = (Math.random() - 0.5) * 2;
+
+      const x = r * Math.cos(angle) + scatterX * 0.6;
+      const z = r * Math.sin(angle) + scatterZ * 0.6;
+      const y = (Math.random() - 0.5) * 0.3;
+
+      armPos[i * 3]     = x;
+      armPos[i * 3 + 1] = y;
+      armPos[i * 3 + 2] = z;
+
+      const t = (r - 2.0) / 14.0;
+      const col = new THREE.Color();
+      if (t < 0.5) {
+        col.lerpColors(cInner, cMid, t * 2.0);
+      } else {
+        col.lerpColors(cMid, cOuter, (t - 0.5) * 2.0);
+      }
+      armCol[i * 3]     = col.r;
+      armCol[i * 3 + 1] = col.g;
+      armCol[i * 3 + 2] = col.b;
+    }
+
+    // Object 3 — Outer halo scatter: 8,000 points in a flat ellipsoid 18 units wide, 1 unit tall, random distribution.
+    // Color dim #ffcc88 at opacity achieved by setting the material's opacity to 0.4 and transparent: true.
+    const haloCount = 8000;
+    const haloPos = new Float32Array(haloCount * 3);
+    const haloCol = new Float32Array(haloCount * 3);
+    const cHalo = new THREE.Color('#ffcc88');
+
+    for (let i = 0; i < haloCount; i++) {
+      const u = Math.random();
+      const theta = Math.random() * Math.PI * 2;
+      const phi = Math.acos(2 * Math.random() - 1);
+      
+      const r = Math.pow(u, 1/3);
+      
+      const x = r * Math.sin(phi) * Math.cos(theta) * 9.0;
+      const y = r * Math.cos(phi) * 0.5;
+      const z = r * Math.sin(phi) * Math.sin(theta) * 9.0;
+
+      haloPos[i * 3]     = x;
+      haloPos[i * 3 + 1] = y;
+      haloPos[i * 3 + 2] = z;
+
+      haloCol[i * 3]     = cHalo.r;
+      haloCol[i * 3 + 1] = cHalo.g;
+      haloCol[i * 3 + 2] = cHalo.b;
+    }
+
+    return {
+      coreData: { pos: corePos, col: coreCol, count: coreCount },
+      armData: { pos: armPos, col: armCol, count: armCount },
+      haloData: { pos: haloPos, col: haloCol, count: haloCount }
+    };
+  }, []);
+
+  useFrame(() => {
+    if (galaxyRef.current) {
+      galaxyRef.current.rotation.y += 0.00006;
+    }
+  });
+
   return (
     <group>
-      {/* CHANGE 5: Central bulge glow sprite */}
-      <sprite ref={bulgeRef} position={[OX_S, 0, 0]} scale={[9000, 6500, 1]}>
-        <spriteMaterial map={bulgeTex} transparent blending={THREE.AdditiveBlending} depthWrite={false} opacity={0} />
-      </sprite>
-      {/* Outer disc haze */}
-      <sprite ref={outerRef} position={[OX_S, 0, 0]} scale={[55000, 32000, 1]}>
-        <spriteMaterial map={outerTex} transparent blending={THREE.AdditiveBlending} depthWrite={false} opacity={0} />
-      </sprite>
-
-      {/* Galaxy particles — realistic star colors, 3D thickness, dust lane gaps */}
-      <group ref={groupRef} scale={[SC, SC, SC]}>
+      {/* ── Galaxy Group (offset center from solar system) ── */}
+      <group ref={galaxyRef} position={[OX_S, 0, 0]} scale={[3000, 3000, 3000]}>
         <group rotation={[Math.PI * 0.07, 0.04, 0]}>
-
-          {/* Volumetric 3D Bulge Concentric Spheres (creates high-density cinematic depth) */}
-          <mesh position={[-2750, 0, 0]}>
-            <sphereGeometry args={[250, 32, 32]} />
-            <meshBasicMaterial 
-              ref={coreSphereRef1}
-              color="#FFE0B2" 
-              transparent={true} 
-              opacity={0} 
-              blending={THREE.AdditiveBlending} 
-              depthWrite={false} 
+          {/* Object 1 — Core */}
+          <points>
+            <bufferGeometry>
+              <bufferAttribute attach="attributes-position" args={[coreData.pos, 3]} count={coreData.count} array={coreData.pos} itemSize={3} />
+              <bufferAttribute attach="attributes-color"    args={[coreData.col, 3]} count={coreData.count} array={coreData.col} itemSize={3} />
+            </bufferGeometry>
+            <pointsMaterial
+              size={2.5}
+              sizeAttenuation
+              vertexColors
+              blending={THREE.AdditiveBlending}
+              depthWrite={false}
+              map={getCircleTexture()}
+              alphaTest={0.001}
+              transparent
             />
-          </mesh>
-          <mesh position={[-2750, 0, 0]}>
-            <sphereGeometry args={[500, 32, 32]} />
-            <meshBasicMaterial 
-              ref={coreSphereRef2}
-              color="#FFB74D" 
-              transparent={true} 
-              opacity={0} 
-              blending={THREE.AdditiveBlending} 
-              depthWrite={false} 
+          </points>
+
+          {/* Object 2 — Spiral arms */}
+          <points>
+            <bufferGeometry>
+              <bufferAttribute attach="attributes-position" args={[armData.pos, 3]} count={armData.count} array={armData.pos} itemSize={3} />
+              <bufferAttribute attach="attributes-color"    args={[armData.col, 3]} count={armData.count} array={armData.col} itemSize={3} />
+            </bufferGeometry>
+            <pointsMaterial
+              size={1.8}
+              sizeAttenuation
+              vertexColors
+              blending={THREE.AdditiveBlending}
+              depthWrite={false}
+              map={getCircleTexture()}
+              alphaTest={0.001}
+              transparent
             />
-          </mesh>
-          <mesh position={[-2750, 0, 0]}>
-            <sphereGeometry args={[850, 32, 32]} />
-            <meshBasicMaterial 
-              ref={coreSphereRef3}
-              color="#FF8A65" 
-              transparent={true} 
-              opacity={0} 
-              blending={THREE.AdditiveBlending} 
-              depthWrite={false} 
+          </points>
+
+          {/* Object 3 — Outer halo scatter */}
+          <points>
+            <bufferGeometry>
+              <bufferAttribute attach="attributes-position" args={[haloData.pos, 3]} count={haloData.count} array={haloData.pos} itemSize={3} />
+              <bufferAttribute attach="attributes-color"    args={[haloData.col, 3]} count={haloData.count} array={haloData.col} itemSize={3} />
+            </bufferGeometry>
+            <pointsMaterial
+              size={1.2}
+              sizeAttenuation
+              vertexColors
+              blending={THREE.AdditiveBlending}
+              depthWrite={false}
+              map={getCircleTexture()}
+              alphaTest={0.001}
+              transparent
+              opacity={0.4}
             />
-          </mesh>
-
-          {/* 3D Volumetric Gas Clouds (pure particle density field tracing the arms) */}
-          <group position={[-2750, 0, 0]}>
-            <Volumetric3DGalaxyGas baseAngle={0} color="#ff9e40" opacityRef={gasOpRef} size={110} />
-            <Volumetric3DGalaxyGas baseAngle={Math.PI} color="#00bcd4" opacityRef={gasOpRef} size={110} />
-            <Volumetric3DCoreGas opacityRef={gasOpRef} />
-          </group>
-
-          {/* Arm 1 — CHANGE 6: size=1.8, sizeAttenuation */}
-          <points ref={arm1Ref}>
-            <bufferGeometry>
-              <bufferAttribute attach="attributes-position" args={[gData.a1p, 3]} count={gData.a1Count} array={gData.a1p} itemSize={3} />
-              <bufferAttribute attach="attributes-color"    args={[gData.a1c, 3]} count={gData.a1Count} array={gData.a1c} itemSize={3} />
-            </bufferGeometry>
-            <pointsMaterial size={1.8} vertexColors transparent opacity={0}
-              blending={THREE.AdditiveBlending} sizeAttenuation depthWrite={false}
-              map={starTex} alphaTest={0.001} />
           </points>
-
-          {/* Arm 2 */}
-          <points ref={arm2Ref}>
-            <bufferGeometry>
-              <bufferAttribute attach="attributes-position" args={[gData.a2p, 3]} count={gData.a2Count} array={gData.a2p} itemSize={3} />
-              <bufferAttribute attach="attributes-color"    args={[gData.a2c, 3]} count={gData.a2Count} array={gData.a2c} itemSize={3} />
-            </bufferGeometry>
-            <pointsMaterial size={1.8} vertexColors transparent opacity={0}
-              blending={THREE.AdditiveBlending} sizeAttenuation depthWrite={false}
-              map={starTex} alphaTest={0.001} />
-          </points>
-
-          {/* Golden core */}
-          <points ref={coreRef}>
-            <bufferGeometry>
-              <bufferAttribute attach="attributes-position" args={[gData.cp, 3]} count={gData.coreCount} array={gData.cp} itemSize={3} />
-              <bufferAttribute attach="attributes-color"    args={[gData.cc, 3]} count={gData.coreCount} array={gData.cc} itemSize={3} />
-            </bufferGeometry>
-            <pointsMaterial size={2.4} vertexColors transparent opacity={0}
-              blending={THREE.AdditiveBlending} sizeAttenuation depthWrite={false}
-              map={starTex} alphaTest={0.001} />
-          </points>
-
-          {/* Stellar halo */}
-          <points ref={haloRef}>
-            <bufferGeometry>
-              <bufferAttribute attach="attributes-position" args={[gData.hp, 3]} count={gData.haloCount} array={gData.hp} itemSize={3} />
-            </bufferGeometry>
-            <pointsMaterial size={1.2} color="#FFE4C4" transparent opacity={0}
-              blending={THREE.AdditiveBlending} sizeAttenuation depthWrite={false}
-              map={starTex} alphaTest={0.001} />
-          </points>
-
-          {/* Dust lanes between arms */}
-          <GalaxyDustLanes offsetX={-2750} />
-
-          {/* Layered, Multi-planar Volumetric Haze Disks */}
-          {/* 1. Core central plane (high density) */}
-          <VolumetricHazeDisk 
-            offsetX={-2750} 
-            offsetY={0} 
-            scaleY={1.0} 
-            rotation={0} 
-            count={160000} 
-            size={46} 
-            opacityMultiplier={1.0} 
-            colorShift={0.0} 
-          />
-          {/* 2. Upper tilted gas plane (warm purple shift, slightly rotated) */}
-          <VolumetricHazeDisk 
-            offsetX={-2750} 
-            offsetY={55} 
-            scaleY={0.7} 
-            rotation={0.4} 
-            count={100000} 
-            size={52} 
-            opacityMultiplier={0.8} 
-            colorShift={0.06} 
-          />
-          {/* 3. Lower tilted gas plane (cool teal shift, slightly counter-rotated) */}
-          <VolumetricHazeDisk 
-            offsetX={-2750} 
-            offsetY={-55} 
-            scaleY={0.7} 
-            rotation={-0.4} 
-            count={100000} 
-            size={52} 
-            opacityMultiplier={0.8} 
-            colorShift={-0.06} 
-          />
         </group>
       </group>
 
@@ -2386,13 +1905,16 @@ function Sun({ unreadCount: _unreadCount = 0 }: { unreadCount?: number }) {
 // ─── GROUP NEBULA ───────────────────────────────────────────────────────────
 function GroupNebula({ group, index }: { group: any, index: number }) {
   const theme = useMemo(() => {
+    if (group.theme_color) {
+      return { inner: group.theme_color, outer: group.theme_color };
+    }
     // Generate beautiful curated cosmic color pairs based on group name hash
     const colors = [
-      { inner: '#ff00aa', outer: '#00ffff', label: 'NEON SECTOR' },
-      { inner: '#ffd700', outer: '#ff3300', label: 'SOLARIS OUTPOST' },
-      { inner: '#00ffcc', outer: '#8a5aff', label: 'QUANTUM CORRIDOR' },
-      { inner: '#00ff66', outer: '#0055ff', label: 'EMERALD VOID' },
-      { inner: '#ff3300', outer: '#9900ff', label: 'SUPERNOVA CRADLE' },
+      { inner: '#ff00aa', outer: '#00ffff' },
+      { inner: '#ffd700', outer: '#ff3300' },
+      { inner: '#00ffcc', outer: '#8a5aff' },
+      { inner: '#00ff66', outer: '#0055ff' },
+      { inner: '#ff3300', outer: '#9900ff' },
     ];
     let hash = 0;
     const str = group.name || '';
@@ -2401,7 +1923,7 @@ function GroupNebula({ group, index }: { group: any, index: number }) {
     }
     const idx = Math.abs(hash) % colors.length;
     return colors[idx];
-  }, [group.name]);
+  }, [group.name, group.theme_color]);
 
   const position = useMemo(() => {
     let hash = 0;
@@ -2417,20 +1939,65 @@ function GroupNebula({ group, index }: { group: any, index: number }) {
   const cameraControls = useCamera();
   const setGroupChatOpen = useAppStore(s => s.setGroupChatOpen);
   const setSelectedGroupId = useAppStore(s => s.setSelectedGroupId);
+  const selectedGroupId = useAppStore(s => s.selectedGroupId);
 
-  const ringRef = useRef<THREE.Mesh>(null);
-  const coreRef = useRef<THREE.Points>(null);
+  const crystalRef = useRef<THREE.Mesh>(null);
+  const crystalOuterRef = useRef<THREE.Mesh>(null);
+  const ringsGroupRef = useRef<THREE.Group>(null);
+  const satRef1 = useRef<THREE.Group>(null);
+  const satRef2 = useRef<THREE.Group>(null);
+  const satRef3 = useRef<THREE.Group>(null);
 
-  // Animate the pulsing outer ring and rotating core
-  useFrame(({ clock }) => {
-    if (ringRef.current) {
-      const scale = 1.15 + 0.15 * Math.sin(clock.elapsedTime * 2);
-      ringRef.current.scale.set(scale, scale, scale);
-      ringRef.current.rotation.z = clock.elapsedTime * 0.2;
+  useFrame((state) => {
+    const t = state.clock.getElapsedTime();
+    
+    // Core spin
+    if (crystalRef.current) {
+      crystalRef.current.rotation.y = t * 0.25;
+      crystalRef.current.rotation.x = t * 0.1;
     }
-    if (coreRef.current) {
-      coreRef.current.rotation.y = clock.elapsedTime * 0.05;
-      coreRef.current.rotation.x = clock.elapsedTime * 0.02;
+    if (crystalOuterRef.current) {
+      crystalOuterRef.current.rotation.y = -t * 0.15;
+      crystalOuterRef.current.rotation.z = t * 0.05;
+    }
+    
+    // Gyroscope rings rotation
+    if (ringsGroupRef.current) {
+      if (ringsGroupRef.current.children[0]) {
+        ringsGroupRef.current.children[0].rotation.z = t * 0.3;
+      }
+      if (ringsGroupRef.current.children[1]) {
+        ringsGroupRef.current.children[1].rotation.x = t * 0.2;
+      }
+      if (ringsGroupRef.current.children[2]) {
+        ringsGroupRef.current.children[2].rotation.y = -t * 0.15;
+      }
+    }
+
+    // Orbiting traveler satellites (active members)
+    if (satRef1.current) {
+      const angle = t * 0.7;
+      satRef1.current.position.set(
+        Math.cos(angle) * 28,
+        Math.sin(angle) * 8,
+        Math.sin(angle) * 28
+      );
+    }
+    if (satRef2.current) {
+      const angle = t * 0.5 + 2.2;
+      satRef2.current.position.set(
+        Math.cos(angle) * 34,
+        Math.cos(angle) * 12,
+        Math.sin(angle) * 34
+      );
+    }
+    if (satRef3.current) {
+      const angle = -t * 0.6 + 4.4;
+      satRef3.current.position.set(
+        Math.sin(angle) * 31,
+        Math.sin(angle) * -14,
+        Math.cos(angle) * 31
+      );
     }
   });
 
@@ -2447,132 +2014,145 @@ function GroupNebula({ group, index }: { group: any, index: number }) {
     }
   };
 
-  const puffTex = useMemo(() => {
-    const c = document.createElement('canvas'); c.width = c.height = 64;
-    const ctx = c.getContext('2d')!;
-    const g = ctx.createRadialGradient(32,32,0, 32,32,32);
-    g.addColorStop(0,   'rgba(255,255,255,1)');
-    g.addColorStop(0.35,'rgba(255,255,255,0.7)');
-    g.addColorStop(0.7, 'rgba(255,255,255,0.2)');
-    g.addColorStop(1,   'rgba(0,0,0,0)');
-    ctx.fillStyle = g; ctx.fillRect(0,0,64,64);
-    return new THREE.CanvasTexture(c);
-  }, []);
-
-  const { positions, colors } = useMemo(() => {
-    const N = 6000; // Optimal performance, beautiful density
-    const pos = new Float32Array(N * 3);
-    const col = new Float32Array(N * 3);
-
-    const inner = new THREE.Color(theme.inner);
-    const outer = new THREE.Color(theme.outer);
-
-    let seed = index * 99;
-    const rng = () => { seed = (seed * 16807 + 0) % 2147483647; return (seed - 1) / 2147483646; };
-
-    const nebulaScale = 85; // Massive volumetric presence!
-
-    for (let i = 0; i < N; i++) {
-      const r = Math.pow(rng(), 1.4) * nebulaScale * 0.5;
-      const theta = rng() * Math.PI * 2;
-      const phi = Math.acos(2 * rng() - 1);
-      
-      // Ellipsoid stretch
-      const ex = 1.2 + rng() * 0.4;
-      const ey = 0.5 + rng() * 0.3; // Volumetrically thick but slightly flattened
-      const ez = 1.2 + rng() * 0.4;
-
-      pos[i * 3]     = Math.sin(phi) * Math.cos(theta) * r * ex;
-      pos[i * 3 + 1] = Math.cos(phi) * r * ey;
-      pos[i * 3 + 2] = Math.sin(phi) * Math.sin(theta) * r * ez;
-
-      const t = r / (nebulaScale * 0.5);
-
-      const c = new THREE.Color().lerpColors(inner, outer, t);
-      // Pockets of neon highlight
-      if (rng() < 0.1) {
-        c.addScalar(0.2);
-      }
-      col[i * 3] = c.r; col[i * 3 + 1] = c.g; col[i * 3 + 2] = c.b;
-    }
-    return { positions: pos, colors: col };
-  }, [theme, index]);
-
   return (
     <group position={position}>
-      {/* Volumetric Nebula Particles */}
-      <points ref={coreRef}>
-        <bufferGeometry>
-          <bufferAttribute attach="attributes-position" args={[positions, 3]} />
-          <bufferAttribute attach="attributes-color" args={[colors, 3]} />
-        </bufferGeometry>
-        <pointsMaterial
-          size={5}
-          vertexColors
-          transparent
-          opacity={0.65}
-          blending={THREE.AdditiveBlending}
-          depthWrite={false}
-          map={puffTex}
-        />
-      </points>
+      {/* Dynamic central point light */}
+      <pointLight color={theme.inner} intensity={2.0} distance={100} decay={2} />
 
-      {/* Orbiting Ring Field */}
-      <mesh ref={ringRef} lookAt={() => new THREE.Vector3(0, 0, 0)} rotation={[Math.PI / 2, 0, 0]}>
-        <ringGeometry args={[48, 52, 64]} />
-        <meshBasicMaterial 
-          color={theme.inner} 
-          transparent 
-          opacity={0.45} 
-          blending={THREE.AdditiveBlending} 
-          depthWrite={false} 
-          side={THREE.DoubleSide} 
-        />
-      </mesh>
+      {/* Layered Crystalline Core */}
+      <group>
+        {/* Core glow source */}
+        <mesh>
+          <sphereGeometry args={[5, 16, 16]} />
+          <meshBasicMaterial
+            color={theme.inner}
+            transparent
+            opacity={0.8}
+            blending={THREE.AdditiveBlending}
+          />
+        </mesh>
 
-      {/* Interactive Raycast Target Sphere */}
+        {/* Low-Poly facetted solid core */}
+        <mesh ref={crystalRef}>
+          <icosahedronGeometry args={[8.5, 1]} />
+          <meshStandardMaterial
+            color="#090d16"
+            emissive={theme.inner}
+            emissiveIntensity={0.65}
+            roughness={0.05}
+            metalness={0.98}
+            flatShading={true}
+          />
+        </mesh>
+
+        {/* Crystalline Holographic Outer Wireframe Shell */}
+        <mesh ref={crystalOuterRef}>
+          <icosahedronGeometry args={[11, 1]} />
+          <meshBasicMaterial
+            color={theme.inner}
+            transparent
+            opacity={0.3}
+            wireframe={true}
+            blending={THREE.AdditiveBlending}
+            depthWrite={false}
+          />
+        </mesh>
+      </group>
+
+      {/* Gyroscope rings */}
+      <group ref={ringsGroupRef}>
+        {/* Ring 1 - Inner (Horizontal) */}
+        <mesh rotation={[Math.PI / 2, 0, 0]}>
+          <torusGeometry args={[20, 0.12, 8, 90]} />
+          <meshBasicMaterial
+            color={theme.inner}
+            transparent
+            opacity={0.65}
+            blending={THREE.AdditiveBlending}
+          />
+        </mesh>
+
+        {/* Ring 2 - Middle (Vertical X) */}
+        <mesh rotation={[Math.PI / 4, Math.PI / 4, 0]}>
+          <torusGeometry args={[26, 0.08, 8, 90]} />
+          <meshBasicMaterial
+            color={theme.outer}
+            transparent
+            opacity={0.5}
+            blending={THREE.AdditiveBlending}
+          />
+        </mesh>
+
+        {/* Ring 3 - Outer (Diagonal Z) */}
+        <mesh rotation={[-Math.PI / 4, 0, Math.PI / 4]}>
+          <torusGeometry args={[32, 0.05, 8, 90]} />
+          <meshBasicMaterial
+            color={theme.inner}
+            transparent
+            opacity={0.4}
+            blending={THREE.AdditiveBlending}
+          />
+        </mesh>
+      </group>
+
+      {/* Active Traveler satellites */}
+      <group ref={satRef1}>
+        <mesh>
+          <sphereGeometry args={[1.5, 16, 16]} />
+          <meshBasicMaterial color={theme.inner} />
+        </mesh>
+        <pointLight color={theme.inner} intensity={1.5} distance={15} decay={2} />
+      </group>
+
+      <group ref={satRef2}>
+        <mesh>
+          <sphereGeometry args={[1.2, 16, 16]} />
+          <meshBasicMaterial color={theme.outer} />
+        </mesh>
+        <pointLight color={theme.outer} intensity={1.0} distance={12} decay={2} />
+      </group>
+
+      <group ref={satRef3}>
+        <mesh>
+          <sphereGeometry args={[0.9, 16, 16]} />
+          <meshBasicMaterial color={theme.inner} />
+        </mesh>
+        <pointLight color={theme.inner} intensity={0.8} distance={10} decay={2} />
+      </group>
+
+      {/* Interactive Raycast Target Sphere with Holographic Targeting Grid on hover */}
       <mesh 
         onClick={handleFocus}
         onPointerOver={() => { setHovered(true); document.body.style.cursor = 'pointer'; }}
         onPointerOut={() => { setHovered(false); document.body.style.cursor = 'default'; }}
       >
-        <sphereGeometry args={[45, 16, 16]} />
+        <sphereGeometry args={[44, 24, 24]} />
         <meshBasicMaterial 
           color={theme.outer} 
           transparent 
-          opacity={hovered ? 0.25 : 0.08} 
+          opacity={0.0001} 
+          wireframe={true}
           blending={THREE.AdditiveBlending} 
           depthWrite={false} 
         />
       </mesh>
 
       {/* Hover/Visual Label */}
-      <Html distanceFactor={450} position={[0, 60, 0]} center className="pointer-events-none select-none">
-        <div 
-          className="flex flex-col items-center gap-1.5 transition-all duration-300"
-          style={{
-            transform: hovered ? 'scale(1.15)' : 'scale(1.0)',
-            opacity: 0.95
-          }}
-        >
-          <span 
-            className="px-3.5 py-1.5 rounded-md font-orbitron font-extrabold text-xs uppercase tracking-widest border transition-all shadow-[0_0_15px_rgba(138,90,255,0.25)] whitespace-nowrap"
-            style={{
-              background: 'linear-gradient(135deg, rgba(8, 4, 16, 0.96), rgba(4, 2, 8, 0.92))',
-              borderColor: hovered ? theme.inner : 'rgba(255,255,255,0.15)',
-              color: hovered ? '#ffffff' : '#ffd700',
-              textShadow: `0 0 8px ${theme.inner}`
+      {hovered && selectedGroupId !== group.id && (
+        <Html position={[0, 60, 0]} center className="pointer-events-none select-none">
+          <div 
+            className="backdrop-blur-md border px-4 py-1.5 rounded-full text-white text-[10px] font-orbitron tracking-widest uppercase whitespace-nowrap shadow-lg flex items-center gap-2"
+            style={{ 
+              backgroundColor: 'rgba(0, 0, 0, 0.85)',
+              borderColor: theme.inner || '#7c3aed',
+              boxShadow: `0 0 15px ${(theme.inner || '#7c3aed')}40`
             }}
           >
-            🛰️ {group.name.toUpperCase()} SECTOR
-          </span>
-          <span 
-            className="text-[9px] font-mono tracking-widest text-[#a0b9ff]/60 uppercase whitespace-nowrap bg-black/60 px-2 py-0.5 rounded border border-white/5"
-          >
-            {group.memberIds.length} TRAVELERS ONLINE
-          </span>
-        </div>
-      </Html>
+            <span className="w-2 h-2 rounded-full animate-pulse" style={{ backgroundColor: theme.inner || '#7c3aed' }} />
+            <span>{group.name}</span>
+          </div>
+        </Html>
+      )}
     </group>
   );
 }
@@ -3021,8 +2601,35 @@ function DoubleClickZoom() {
 function CameraDistanceTracker({ onChange }: { onChange: (visible: boolean) => void }) {
   useFrame(({ camera }) => {
     const dist = camera.position.length();
-    onChange(dist > 550);
+    onChange(dist > 550 || dist < 420);
   });
+  return null;
+}
+
+// ─── SCENE CLEANUP DISPOSAL ──────────────────────────────────────────────────
+function SceneCleanup() {
+  const { scene, gl } = useThree();
+  useEffect(() => {
+    return () => {
+      scene.traverse((object: any) => {
+        if (object.geometry) {
+          object.geometry.dispose();
+        }
+        if (object.material) {
+          if (Array.isArray(object.material)) {
+            object.material.forEach((mat: any) => {
+              if (mat.map) mat.map.dispose();
+              mat.dispose();
+            });
+          } else {
+            if (object.material.map) object.material.map.dispose();
+            object.material.dispose();
+          }
+        }
+      });
+      gl.dispose();
+    };
+  }, [scene, gl]);
   return null;
 }
 
@@ -3036,7 +2643,7 @@ export default function SolarSystem({ hideReturnButton }: { hideReturnButton?: b
     }
   }, []);
 
-  const { assignments, unreadCount, activeTransmissions, removeTransmission, groups, letters } = useAppStore();
+  const { assignments, unreadCount, activeTransmissions, removeTransmission, groups, letters, isGroupChatOpen } = useAppStore();
 
   const getPlanetUnreadCount = (planetName: string) => {
     const friendId = assignments.find(a => a.planetName === planetName)?.friend?.id;
@@ -3060,7 +2667,7 @@ export default function SolarSystem({ hideReturnButton }: { hideReturnButton?: b
             outputColorSpace: THREE.SRGBColorSpace,
           }}
           camera={{ fov: 60, near: 0.001, far: 9999999, position: [-320, 110, -360] }}
-          style={{ width: '100vw', height: '100vh', background: '#000005' }}
+          className="solar-canvas"
         >
           <CameraControls
             ref={cameraControlsRef}
@@ -3072,6 +2679,7 @@ export default function SolarSystem({ hideReturnButton }: { hideReturnButton?: b
             dollyToCursor={false}
             makeDefault
           />
+          <SceneCleanup />
 
           <DoubleClickZoom />
 
@@ -3137,11 +2745,11 @@ export default function SolarSystem({ hideReturnButton }: { hideReturnButton?: b
         </Canvas>
 
         {/* Viewport-steady Return Button Overlay */}
-        {isZoomedOut && !hideReturnButton && (
-          <div className="absolute bottom-6 left-6 z-[100] pointer-events-auto">
+        {isZoomedOut && !hideReturnButton && !isGroupChatOpen && (
+          <div className="return-btn-container absolute bottom-6 left-6 z-[100] pointer-events-auto">
             <button
               onClick={() => cameraControlsRef.current?.setLookAt(-320, 110, -360, 0, 0, 0, true)}
-              className="px-6 py-3 bg-[#050510]/60 backdrop-blur-xl border border-[#D4AF37]/50 text-[#D4AF37] text-xs font-bold uppercase tracking-widest rounded-full hover:bg-[#D4AF37] hover:text-black transition-all shadow-[0_0_15px_rgba(212,175,55,0.3)] font-orbitron whitespace-nowrap"
+              className="return-btn px-6 py-3 bg-[#050510]/60 backdrop-blur-xl border border-[#D4AF37]/50 text-[#D4AF37] text-xs font-bold uppercase tracking-widest rounded-full hover:bg-[#D4AF37] hover:text-black transition-all shadow-[0_0_15px_rgba(212,175,55,0.3)] font-orbitron whitespace-nowrap"
             >
               ⌂ Return to Solar System
             </button>

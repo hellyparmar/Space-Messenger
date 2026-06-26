@@ -1,4 +1,5 @@
 import { create } from 'zustand';
+import { api } from '../lib/api';
 
 export interface User {
   id: string;
@@ -11,7 +12,15 @@ export interface User {
   cosmicIdChanges?: number;
 }
 
-interface Letter {
+export interface Sticker {
+  id: string;
+  x: number;
+  y: number;
+  rot: number;
+  iconId: string;
+}
+
+export interface Letter {
   id: string;
   senderId: string;
   receiverId: string;
@@ -20,7 +29,7 @@ interface Letter {
   scheduledAt?: string;
   createdAt: string;
   paperSkin?: string;
-  stickers?: any[];
+  stickers?: Sticker[];
   isFutureSelf?: boolean;
   isPending?: boolean;
 }
@@ -38,6 +47,7 @@ interface Friend {
   isDeactivated?: boolean;
   displayName?: string;
   cosmic_id?: string;
+  bio?: string;
 }
 
 interface Assignment {
@@ -45,10 +55,22 @@ interface Assignment {
   friend?: Friend;
 }
 
+export interface CosmicPosition {
+  x: number;
+  y: number;
+  z: number;
+}
+
 interface Group {
   id: string;
   name: string;
-  memberIds: string[];
+  theme_color?: string;
+  cosmic_position?: CosmicPosition;
+  memberCount?: number;
+  members?: { cosmic_id: string; display_name: string }[];
+  memberIds?: string[];
+  created_by?: string;
+  role?: string;
 }
 
 interface ComposerRecipient {
@@ -123,7 +145,11 @@ export const useAppStore = create<AppState>((set) => {
     selectedGroupId: null,
     isBlackholeOpen: false,
 
-    setUser: (user) => set({ user }),
+    setUser: (user) => {
+      if (user) localStorage.setItem('cosmimail_user', JSON.stringify(user));
+      else localStorage.removeItem('cosmimail_user');
+      set({ user });
+    },
     setComposerRecipient: (recipient) => set({ composerRecipient: recipient }),
     setToken: (token) => {
       if (token) localStorage.setItem('cosmimail_token', token);
@@ -167,7 +193,6 @@ export const useAppStore = create<AppState>((set) => {
       })),
     fetchFriends: async () => {
       try {
-        const { api } = await import('../lib/api');
         const data = await api.get<{ friends: Friend[]; assignments: Assignment[] }>('/api/friends');
         set({ friends: data.friends, assignments: data.assignments });
       } catch (err) {
@@ -176,7 +201,6 @@ export const useAppStore = create<AppState>((set) => {
     },
     fetchGroups: async () => {
       try {
-        const { api } = await import('../lib/api');
         const data = await api.get<Group[]>('/api/groups');
         set({ groups: data });
       } catch (err) {

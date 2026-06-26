@@ -1,20 +1,30 @@
 import { Canvas, useFrame } from '@react-three/fiber';
-import { useRef, useMemo } from 'react';
+import { useRef, useMemo, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { motion } from 'framer-motion';
 import * as THREE from 'three';
 
 // ─── 3D LANDING BACKGROUND COMPONENTS ───────────────────────────────────────
 
+// Pure pseudo-random generator to satisfy react-hooks/purity linter rule
+function makeRandom(seed = 1) {
+  let s = seed;
+  return () => {
+    const x = Math.sin(s++) * 10000;
+    return x - Math.floor(x);
+  };
+}
+
 function TwinklingStars() {
   const count = 300;
   const positions = useMemo(() => {
+    const nextRand = makeRandom(42);
     const arr = new Float32Array(count * 3);
     for (let i = 0; i < count * 3; i += 3) {
       // Spawn in a sphere around the camera
-      const theta = Math.random() * Math.PI * 2;
-      const phi = Math.acos((Math.random() * 2) - 1);
-      const dist = 600 + Math.random() * 400;
+      const theta = nextRand() * Math.PI * 2;
+      const phi = Math.acos((nextRand() * 2) - 1);
+      const dist = 600 + nextRand() * 400;
       arr[i] = dist * Math.sin(phi) * Math.cos(theta);
       arr[i + 1] = dist * Math.sin(phi) * Math.sin(theta);
       arr[i + 2] = dist * Math.cos(phi);
@@ -52,8 +62,9 @@ function TwinklingStars() {
 function LandingComets() {
   const count = 5;
   const lineRefs = useRef<(THREE.LineSegments | null)[]>([]);
+  const cometsRef = useRef<any[]>([]);
 
-  const comets = useMemo(() => {
+  useEffect(() => {
     const data = [];
     for (let i = 0; i < count; i++) {
       data.push({
@@ -66,11 +77,11 @@ function LandingComets() {
         color: Math.random() > 0.5 ? new THREE.Color('#00ffff') : new THREE.Color('#ffaa00'),
       });
     }
-    return data;
+    cometsRef.current = data;
   }, []);
 
   useFrame((_state, delta) => {
-    comets.forEach((comet, idx) => {
+    cometsRef.current.forEach((comet, idx) => {
       const line = lineRefs.current[idx];
       if (!line) return;
 
@@ -119,13 +130,14 @@ function LandingComets() {
 
   return (
     <group>
-      {comets.map((comet, idx) => {
+      {Array.from({ length: count }).map((_, idx) => {
         const geom = new THREE.BufferGeometry();
         const posAttr = new Float32Array(6);
         geom.setAttribute('position', new THREE.BufferAttribute(posAttr, 3));
+        const color = idx % 2 === 0 ? new THREE.Color('#00ffff') : new THREE.Color('#ffaa00');
         const colors = new Float32Array([
           1.0, 1.0, 1.0,
-          comet.color.r * 0.2, comet.color.g * 0.2, comet.color.b * 0.2
+          color.r * 0.2, color.g * 0.2, color.b * 0.2
         ]);
         geom.setAttribute('color', new THREE.BufferAttribute(colors, 3));
 
@@ -242,7 +254,7 @@ export default function LandingPage() {
     <div className="relative w-screen h-screen overflow-hidden bg-[#030208] text-[#F0E8D8] font-sans">
       
       {/* 3D Canvas Background */}
-      <div className="absolute inset-0 z-0 pointer-events-none">
+      <div className="canvas-container pointer-events-none">
         <Canvas camera={{ fov: 60, position: [0, 0, 150] }}>
           <ambientLight intensity={0.6} />
           <TwinklingStars />

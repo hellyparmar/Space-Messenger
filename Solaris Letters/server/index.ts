@@ -1,9 +1,26 @@
-import 'dotenv/config';
+import dotenv from 'dotenv';
+import path from 'path';
+dotenv.config();
+dotenv.config({ path: path.resolve(__dirname, '.env') });
+dotenv.config({ path: path.resolve(__dirname, '../.env') });
+
 import express from 'express';
 import cors from 'cors';
 import http from 'http';
 import { Server as SocketServer } from 'socket.io';
-import jwt from 'jsonwebtoken';
+import { createClient } from '@supabase/supabase-js';
+import WebSocket from 'ws';
+
+if (typeof global.WebSocket === 'undefined') {
+  (global as any).WebSocket = WebSocket;
+}
+
+const supabase = createClient(
+  process.env.SUPABASE_URL || '',
+  process.env.SUPABASE_SERVICE_KEY || '',
+  { auth: { autoRefreshToken: false, persistSession: false } }
+);
+import helmet from 'helmet';
 
 import authRouter      from './routes/auth';
 import lettersRouter   from './routes/letters';
@@ -17,26 +34,38 @@ import { initScheduler } from './scheduler';
 const app        = express();
 const httpServer = http.createServer(app);
 const PORT   = Number(process.env.PORT) || 4000;
-const SECRET = process.env.JWT_SECRET    || 'cosmimail_secret_key_xyz_2024';
 
 // Allow comma-separated origins via CORS_ORIGIN env var
 // e.g. "https://your-app.netlify.app,http://localhost:5173"
-const ALLOWED_ORIGINS = (process.env.CORS_ORIGIN || 'http://localhost:5173,http://127.0.0.1:5173')
+const ALLOWED_ORIGINS = (process.env.CORS_ORIGIN || 'https://space-messengerr.netlify.app,http://localhost:5173,http://127.0.0.1:5173')
   .split(',')
   .map((o) => o.trim());
 
 // ── Socket.io ────────────────────────────────────────────────────────────────
 const io = new SocketServer(httpServer, {
-  cors: { origin: '*', methods: ['GET', 'POST'] },
+  cors: {
+    origin: (origin, callback) => {
+      if (!origin || ALLOWED_ORIGINS.includes(origin) || origin.startsWith('http://localhost') || origin.startsWith('http://127.0.0.1')) {
+        callback(null, true);
+      } else {
+        callback(new Error('Not allowed by CORS'));
+      }
+    },
+    methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+    credentials: true
+  },
 });
 app.set('io', io);
 
-io.use((socket, next) => {
+io.use(async (socket, next) => {
   const token = socket.handshake.auth?.token as string | undefined;
   if (!token) return next(new Error('Unauthorized'));
   try {
-    const payload = jwt.verify(token, SECRET) as { sub: string };
-    (socket as any).userId = payload.sub;
+    const { data: { user }, error } = await supabase.auth.getUser(token);
+    if (error || !user) {
+      return next(new Error('Invalid token'));
+    }
+    (socket as any).userId = user.id;
     next();
   } catch {
     next(new Error('Invalid token'));
@@ -54,15 +83,37 @@ io.on('connection', (socket) => {
 initScheduler(io);
 
 // ── Middleware ────────────────────────────────────────────────────────────────
-app.use(cors({
-  origin: ALLOWED_ORIGINS,
-  credentials: true,
-  methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Authorization'],
+app.use(helmet());
+app.use(helmet.contentSecurityPolicy({
+  directives: {
+    defaultSrc: ["'self'"],
+    scriptSrc: ["'self'"],
+    styleSrc: ["'self'", "'unsafe-inline'"],
+    imgSrc: ["'self'", "data:", "blob:"],
+    connectSrc: ["'self'", "wss:", "https:"],
+    frameSrc: ["'none'"],
+    objectSrc: ["'none'"]
+  }
 }));
+
+app.use((req, res, next) => {
+  const origin = req.headers.origin;
+  if (origin && (ALLOWED_ORIGINS.includes(origin) || origin.startsWith('http://localhost') || origin.startsWith('http://127.0.0.1'))) {
+    res.setHeader('Access-Control-Allow-Origin', origin);
+  }
+  res.setHeader('Access-Control-Allow-Credentials', 'true');
+  res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, PATCH, DELETE, OPTIONS');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+
+  if (req.method === 'OPTIONS') {
+    return res.sendStatus(204);
+  }
+  next();
+});
 app.use(express.json());
 
 // ── Public routes (NO auth) ───────────────────────────────────────────────────
+app.get(['/ping', '/api/ping'], (_req, res) => res.json({ status: 'ok' }));
 app.get('/api/health', (_req, res) =>
   res.json({ status: 'alive', timestamp: new Date().toISOString() })
 );
@@ -75,10 +126,27 @@ app.use('/api/groups',    authenticate, groupsRouter);
 app.use('/api/users',     usersRouter);  // auth applied per-route inside
 app.use('/api/blackhole', authenticate, blackholeRouter);
 
+// Security logs store
+const securityFlags = new Map<string, { count: number, attempts: string[] }>();
+
+app.post(['/security/flag', '/api/security/flag'], authenticate, (req: any, res: any) => {
+  const userId = req.userId;
+  const timestamp = req.body.timestamp || new Date().toISOString();
+  if (!userId) {
+    return res.status(400).json({ error: 'User ID missing' });
+  }
+  const record = securityFlags.get(userId) || { count: 0, attempts: [] };
+  record.count += 1;
+  record.attempts.push(timestamp);
+  securityFlags.set(userId, record);
+  console.log(`[security] Flagged attempt logged for user: ${userId} at ${timestamp}. Total count: ${record.count}`);
+  return res.json({ success: true, count: record.count });
+});
+
 // ── Error handler ─────────────────────────────────────────────────────────────
 app.use((err: any, _req: express.Request, res: express.Response, _next: express.NextFunction) => {
-  console.error('UNHANDLED ERROR:', err.message);
-  res.status(500).json({ message: err.message || 'Server error' });
+  console.error(err.stack); // log internally only
+  res.status(err.status || 500).json({ error: 'Something went wrong. Please try again.' });
 });
 
 // ── Start ─────────────────────────────────────────────────────────────────────

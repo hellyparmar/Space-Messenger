@@ -4,6 +4,15 @@ import { authenticate, AuthRequest } from '../middleware/auth';
 
 const router = Router();
 
+function sanitizeInput(text: any, maxLength?: number): string {
+  if (typeof text !== 'string') return '';
+  const stripped = text.replace(/<[^>]*>/g, '');
+  if (maxLength !== undefined) {
+    return stripped.slice(0, maxLength);
+  }
+  return stripped;
+}
+
 // GET /api/friends — fetch friends via friendships table
 router.get('/', authenticate, async (req: AuthRequest, res: Response) => {
   try {
@@ -36,52 +45,9 @@ router.get('/', authenticate, async (req: AuthRequest, res: Response) => {
 
     const dbAssignments = await prisma.planetAssignment.findMany({
       where: { user_id: userId },
-      include: { friend: { select: { id: true, cosmic_id: true, display_name: true } } }
+      include: { friend: { select: { id: true, cosmic_id: true, display_name: true, bio: true } } }
     });
 
-    // Determine unassigned friends
-    const assignedFriendIds = new Set(dbAssignments.map(a => a.friend_id));
-    const assignedPlanets = new Set(dbAssignments.map(a => a.planet_name));
-    
-    const unassignedFriends = friends.filter(f => !assignedFriendIds.has(f.id));
-    
-    if (unassignedFriends.length > 0) {
-      const INNER_PLANETS = ['Mercury', 'Venus', 'Earth', 'Mars'];
-      const OUTER_PLANETS = ['Jupiter', 'Saturn', 'Uranus', 'Neptune'];
-      const DWARF_PLANETS = ['Pluto', 'Ceres', 'Eris', 'Haumea', 'Makemake'];
-      
-      const newAssignments: any[] = [];
-      
-      for (const f of unassignedFriends) {
-        let chosenPlanet = '';
-        if (f.interactionCount >= 10 && INNER_PLANETS.some(p => !assignedPlanets.has(p))) {
-          chosenPlanet = INNER_PLANETS.find(p => !assignedPlanets.has(p))!;
-        } else if (f.interactionCount >= 3 && OUTER_PLANETS.some(p => !assignedPlanets.has(p))) {
-          chosenPlanet = OUTER_PLANETS.find(p => !assignedPlanets.has(p))!;
-        } else if (DWARF_PLANETS.some(p => !assignedPlanets.has(p))) {
-          chosenPlanet = DWARF_PLANETS.find(p => !assignedPlanets.has(p))!;
-        } else {
-          // If dwarf planets are also full, just start grabbing anything left over
-          const ALL = [...INNER_PLANETS, ...OUTER_PLANETS, ...DWARF_PLANETS];
-          chosenPlanet = ALL.find(p => !assignedPlanets.has(p)) || '';
-        }
-        
-        if (chosenPlanet) {
-          assignedPlanets.add(chosenPlanet);
-          newAssignments.push({ user_id: userId, friend_id: f.id, planet_name: chosenPlanet });
-          dbAssignments.push({
-            user_id: userId,
-            friend_id: f.id,
-            planet_name: chosenPlanet,
-            friend: { id: f.id, cosmic_id: f.username, display_name: f.displayName }
-          } as any);
-        }
-      }
-
-      if (newAssignments.length > 0) {
-        await prisma.planetAssignment.createMany({ data: newAssignments });
-      }
-    }
 
     const assignments = dbAssignments.map(a => ({
       planetName: a.planet_name,
@@ -89,6 +55,7 @@ router.get('/', authenticate, async (req: AuthRequest, res: Response) => {
         id: a.friend.id,
         username: a.friend.cosmic_id,
         displayName: a.friend.display_name,
+        bio: a.friend.bio,
       }
     }));
 
@@ -129,7 +96,7 @@ router.post('/', authenticate, async (req: AuthRequest, res: Response) => {
 router.delete('/:friendId', authenticate, async (req: AuthRequest, res: Response) => {
   try {
     const userId = req.userId!;
-    const { friendId } = req.params;
+    const friendId = req.params.friendId as string;
 
     // Delete friendships
     await prisma.friendship.deleteMany({
@@ -186,7 +153,7 @@ router.post('/request', authenticate, async (req: AuthRequest, res: Response) =>
       data: { sender_id: senderId, target_id: target.id, status: 'pending' }
     });
     res.status(201).json({ request });
-  } catch (err: any) { res.status(500).json({ message: err.message }); }
+  } catch (err: any) { res.status(500).json({ message: 'Request failed' }); }
 });
 
 router.get('/requests/incoming', authenticate, async (req: AuthRequest, res: Response) => {
@@ -196,73 +163,126 @@ router.get('/requests/incoming', authenticate, async (req: AuthRequest, res: Res
       include: { sender: { select: { id:true, display_name:true, cosmic_id:true } } }
     });
     res.json({ requests });
-  } catch (err: any) { res.status(500).json({ message: err.message }); }
+  } catch (err: any) { res.status(500).json({ message: 'Request failed' }); }
 });
 
 router.get('/requests/outgoing', authenticate, async (req: AuthRequest, res: Response) => {
   try {
     const requests = await prisma.friendRequest.findMany({
-      where: { sender_id: req.userId!, status: 'pending' },
+      where: {
+        sender_id: req.userId!,
+        status: { in: ['pending', 'accepted'] }
+      },
       include: { target: { select: { id:true, display_name:true, cosmic_id:true } } }
     });
     res.json({ requests });
-  } catch (err: any) { res.status(500).json({ message: err.message }); }
+  } catch (err: any) { res.status(500).json({ message: 'Request failed' }); }
 });
 
 router.delete('/request/:id/cancel', authenticate, async (req: AuthRequest, res: Response) => {
   try {
-    await prisma.friendRequest.delete({ where: { id: req.params.id } });
+    const request = await prisma.friendRequest.findUnique({
+      where: { id: req.params.id as string }
+    });
+    if (!request) return res.status(404).json({ message: 'Request not found' });
+    if (request.sender_id !== req.userId!) return res.status(403).json({ message: 'Forbidden' });
+
+    await prisma.friendRequest.delete({ where: { id: req.params.id as string } });
     res.json({ message: 'Request cancelled' });
-  } catch (err: any) { res.status(500).json({ message: err.message }); }
+  } catch (err: any) { res.status(500).json({ message: 'Request failed' }); }
 });
 
 router.post('/request/:id/accept', authenticate, async (req: AuthRequest, res: Response) => {
   try {
     const { planetName } = req.body;
-    const request = await prisma.friendRequest.update({
-      where: { id: req.params.id },
+    const request = await prisma.friendRequest.findUnique({
+      where: { id: req.params.id as string }
+    });
+    if (!request) return res.status(404).json({ message: 'Request not found' });
+    if (request.target_id !== req.userId!) return res.status(403).json({ message: 'Forbidden' });
+    if (request.status !== 'pending') return res.status(400).json({ message: 'Request not pending' });
+
+    const updatedRequest = await prisma.friendRequest.update({
+      where: { id: req.params.id as string },
+      data: { status: 'accepted' }
+    });
+    
+    await prisma.friendship.upsert({
+      where: { user_id_friend_id: { user_id: req.userId!, friend_id: updatedRequest.sender_id } },
+      update: {},
+      create: { user_id: req.userId!, friend_id: updatedRequest.sender_id },
+    });
+    
+    if (planetName) {
+      const cleanPlanetName = sanitizeInput(planetName, 50);
+      await prisma.planetAssignment.upsert({
+        where: { user_id_friend_id: { user_id: req.userId!, friend_id: updatedRequest.sender_id } },
+        create: { user_id: req.userId!, friend_id: updatedRequest.sender_id, planet_name: cleanPlanetName },
+        update: { planet_name: cleanPlanetName }
+      });
+    }
+    res.json({ success: true });
+  } catch (err: any) { res.status(500).json({ message: 'Request failed' }); }
+});
+
+router.post('/request/:id/finalize', authenticate, async (req: AuthRequest, res: Response) => {
+  try {
+    const { planetName } = req.body;
+    if (!planetName) return res.status(400).json({ message: 'planetName required' });
+    
+    const request = await prisma.friendRequest.findUnique({
+      where: { id: req.params.id as string }
+    });
+    if (!request) return res.status(404).json({ message: 'Request not found' });
+    if (request.sender_id !== req.userId!) return res.status(403).json({ message: 'Forbidden' });
+    if (request.status !== 'accepted') return res.status(400).json({ message: 'Request is not in accepted state' });
+    
+    await prisma.friendRequest.update({
+      where: { id: req.params.id as string },
       data: { status: 'active' }
     });
     
     await prisma.friendship.upsert({
-      where: { user_id_friend_id: { user_id: req.userId!, friend_id: request.sender_id } },
+      where: { user_id_friend_id: { user_id: req.userId!, friend_id: request.target_id } },
       update: {},
-      create: { user_id: req.userId!, friend_id: request.sender_id },
-    });
-    await prisma.friendship.upsert({
-      where: { user_id_friend_id: { user_id: request.sender_id, friend_id: req.userId! } },
-      update: {},
-      create: { user_id: request.sender_id, friend_id: req.userId! },
+      create: { user_id: req.userId!, friend_id: request.target_id },
     });
     
-    if (planetName) {
-      await prisma.planetAssignment.upsert({
-        where: { user_id_friend_id: { user_id: req.userId!, friend_id: request.sender_id } },
-        create: { user_id: req.userId!, friend_id: request.sender_id, planet_name: planetName },
-        update: { planet_name: planetName }
-      });
-    }
+    const cleanPlanetName = sanitizeInput(planetName, 50);
+    await prisma.planetAssignment.upsert({
+      where: { user_id_friend_id: { user_id: req.userId!, friend_id: request.target_id } },
+      create: { user_id: req.userId!, friend_id: request.target_id, planet_name: cleanPlanetName },
+      update: { planet_name: cleanPlanetName }
+    });
+    
     res.json({ success: true });
-  } catch (err: any) { res.status(500).json({ message: err.message }); }
+  } catch (err: any) { res.status(500).json({ message: 'Request failed' }); }
 });
 
 router.delete('/request/:id/decline', authenticate, async (req: AuthRequest, res: Response) => {
   try {
-    await prisma.friendRequest.delete({ where: { id: req.params.id } });
+    const request = await prisma.friendRequest.findUnique({
+      where: { id: req.params.id as string }
+    });
+    if (!request) return res.status(404).json({ message: 'Request not found' });
+    if (request.target_id !== req.userId!) return res.status(403).json({ message: 'Forbidden' });
+
+    await prisma.friendRequest.delete({ where: { id: req.params.id as string } });
     res.json({ message: 'Request declined' });
-  } catch (err: any) { res.status(500).json({ message: err.message }); }
+  } catch (err: any) { res.status(500).json({ message: 'Request failed' }); }
 });
 
 router.patch('/assign-planet', authenticate, async (req: AuthRequest, res: Response) => {
   try {
     const { friendId, planetName } = req.body;
+    const cleanPlanetName = sanitizeInput(planetName, 50);
     const assignment = await prisma.planetAssignment.upsert({
       where: { user_id_friend_id: { user_id: req.userId!, friend_id: friendId } },
-      create: { user_id: req.userId!, friend_id: friendId, planet_name: planetName },
-      update: { planet_name: planetName }
+      create: { user_id: req.userId!, friend_id: friendId, planet_name: cleanPlanetName },
+      update: { planet_name: cleanPlanetName }
     });
     res.json({ assignment });
-  } catch (err: any) { res.status(500).json({ message: err.message }); }
+  } catch (err: any) { res.status(500).json({ message: 'Request failed' }); }
 });
 
 export default router;

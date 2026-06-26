@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useRef } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useAppStore } from '../store/useAppStore';
@@ -27,50 +27,10 @@ export default function RegisterPage() {
   const navigate = useNavigate();
   const { setToken, setUser } = useAppStore();
 
-  // Real-time User ID uniqueness check
-  useEffect(() => {
-    if (formData.userId.length < 3) {
-      setIsIdAvailable(null);
-      return;
-    }
+  const idTimerRef = useRef<any>(null);
+  const emailTimerRef = useRef<any>(null);
 
-    const timer = setTimeout(async () => {
-      setIsCheckingId(true);
-      try {
-        const res = await api.get<{ available: boolean }>(`/api/users/check-userid?id=${formData.userId}`);
-        setIsIdAvailable(res.available);
-      } catch {
-        setIsIdAvailable(null);
-      } finally {
-        setIsCheckingId(false);
-      }
-    }, 500);
 
-    return () => clearTimeout(timer);
-  }, [formData.userId]);
-
-  // Real-time Email uniqueness check
-  useEffect(() => {
-    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-    if (!emailRegex.test(formData.email)) {
-      setIsEmailAvailable(null);
-      return;
-    }
-
-    const timer = setTimeout(async () => {
-      setIsCheckingEmail(true);
-      try {
-        const res = await api.get<{ available: boolean }>(`/api/auth/check-email?email=${encodeURIComponent(formData.email)}`);
-        setIsEmailAvailable(res.available);
-      } catch {
-        setIsEmailAvailable(null);
-      } finally {
-        setIsCheckingEmail(false);
-      }
-    }, 600);
-
-    return () => clearTimeout(timer);
-  }, [formData.email]);
 
   const validate = () => {
     const newErrors: Record<string, string> = {};
@@ -200,9 +160,27 @@ export default function RegisterPage() {
                     type="text"
                     value={formData.userId}
                     onChange={(e) => {
-                      setFormData({ ...formData, userId: e.target.value.toLowerCase().replace(/\s/g, '_') });
+                      const val = e.target.value.toLowerCase().replace(/[^a-z0-9_]/g, '');
+                      setFormData((prev) => ({ ...prev, userId: val }));
                       setErrors((prev) => ({ ...prev, global: '' }));
+                      if (idTimerRef.current) clearTimeout(idTimerRef.current);
+                      if (val.length < 3) {
+                        setIsIdAvailable(null);
+                        return;
+                      }
+                      setIsCheckingId(true);
+                      idTimerRef.current = setTimeout(async () => {
+                        try {
+                          const res = await api.get<{ available: boolean }>(`/api/users/check-userid?id=${val}`);
+                          setIsIdAvailable(res.available);
+                        } catch {
+                          setIsIdAvailable(null);
+                        } finally {
+                          setIsCheckingId(false);
+                        }
+                      }, 500);
                     }}
+                    maxLength={20}
                     placeholder="janedoe_77"
                     className={`w-full bg-[var(--input-bg)] border-b py-2 pl-5 pr-8 text-[var(--text-primary)] placeholder:text-[var(--text-dim)]/30 focus:outline-none transition-all font-sans ${
                       isIdAvailable === true ? 'border-emerald-500/50 focus:border-emerald-500' : isIdAvailable === false ? 'border-red-500/50 focus:border-red-500' : 'border-[var(--input-border)] focus:border-[var(--accent-gold)] focus:shadow-[0_2px_0_rgba(200,160,80,0.2)]'
@@ -240,8 +218,26 @@ export default function RegisterPage() {
                   type="email"
                   value={formData.email}
                   onChange={(e) => {
-                    setFormData({ ...formData, email: e.target.value });
+                    const val = e.target.value;
+                    setFormData((prev) => ({ ...prev, email: val }));
                     setErrors((prev) => ({ ...prev, global: '' }));
+                    if (emailTimerRef.current) clearTimeout(emailTimerRef.current);
+                    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+                    if (!emailRegex.test(val)) {
+                      setIsEmailAvailable(null);
+                      return;
+                    }
+                    setIsCheckingEmail(true);
+                    emailTimerRef.current = setTimeout(async () => {
+                      try {
+                        const res = await api.get<{ available: boolean }>(`/api/auth/check-email?email=${encodeURIComponent(val)}`);
+                        setIsEmailAvailable(res.available);
+                      } catch {
+                        setIsEmailAvailable(null);
+                      } finally {
+                        setIsCheckingEmail(false);
+                      }
+                    }, 600);
                   }}
                   placeholder="jane@example.com"
                   className={`w-full bg-[var(--input-bg)] border-b py-2 px-1 pr-8 text-[var(--text-primary)] placeholder:text-[var(--text-dim)]/30 focus:outline-none transition-all font-sans ${

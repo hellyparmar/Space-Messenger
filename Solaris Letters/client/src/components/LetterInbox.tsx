@@ -1,5 +1,6 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
+import DOMPurify from 'dompurify';
 import { useAppStore } from '../store/useAppStore';
 import { api } from '../lib/api';
 import { STICKERS, PAPER_STYLES } from '../lib/letterStyles';
@@ -23,16 +24,29 @@ function formatDate(dateStr: string) {
 }
 
 export default function LetterInbox({ isOpen, onClose, onCompose }: LetterInboxProps) {
-  const { letters, markRead, assignments, setComposerRecipient, user, inboxFriendFilter, setInboxFriendFilter } = useAppStore();
-  const [tab, setTab] = useState<'received' | 'sent'>('received');
+  const { 
+    letters, markRead, assignments, setComposerRecipient, user, inboxFriendFilter, setInboxFriendFilter,
+    groups, fetchGroups, setSelectedGroupId, setGroupChatOpen
+  } = useAppStore();
+  const [tab, setTab] = useState<'received' | 'sent' | 'groups'>('received');
   const [expanded, setExpanded] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (isOpen) {
+      void fetchGroups();
+    }
+  }, [isOpen, fetchGroups]);
   // Future-self: senderId === receiverId === user.id → appears in BOTH tabs (when delivered)
-  const isFutureSelf = (l: any) => l.senderId === user?.id && l.receiverId === user?.id;
+  const isFutureSelf = (l: { senderId?: string; receiverId?: string }) => l.senderId === user?.id && l.receiverId === user?.id;
 
   // Received: letters sent TO me (including future-self deliveries, but NOT pending ones)
-  const receivedLetters = letters.filter(l => (l.senderId !== user?.id || isFutureSelf(l)) && !l.isPending);
+  const receivedLetters = letters
+    .filter(l => (l.senderId !== user?.id || isFutureSelf(l)) && !l.isPending)
+    .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
   // Sent: letters sent BY me (including future-self letters and future-scheduled letters, showing compose time)
-  const sentLetters     = letters.filter(l => l.senderId === user?.id);
+  const sentLetters     = letters
+    .filter(l => l.senderId === user?.id)
+    .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
 
   // If a friend filter is active, narrow down to only the conversation with that friend
   const applyFriendFilter = (list: typeof letters) => {
@@ -81,7 +95,9 @@ export default function LetterInbox({ isOpen, onClose, onCompose }: LetterInboxP
     }
   }
 
-  const unreadCount = receivedLetters.filter(l => !l.isRead).length;
+  const displayedReceived = applyFriendFilter(receivedLetters);
+  const displayedSent = applyFriendFilter(sentLetters);
+  const unreadCount = displayedReceived.filter(l => !l.isRead).length;
 
   return (
     <AnimatePresence>
@@ -91,33 +107,28 @@ export default function LetterInbox({ isOpen, onClose, onCompose }: LetterInboxP
           <motion.div
             initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
             onClick={onClose}
-            style={{ position: 'fixed', inset: 0, zIndex: 100, background: 'rgba(0,0,0,0.65)', backdropFilter: 'blur(4px)' }}
+            className="inbox-backdrop"
           />
 
           {/* Panel */}
           <motion.div
             initial={{ x: '-100%' }} animate={{ x: 0 }} exit={{ x: '-100%' }}
             transition={{ type: 'spring', damping: 28, stiffness: 220 }}
-            className="cosmic-card"
-            style={{
-              position: 'fixed', top: 0, left: 0, height: '100%', width: 420,
-              zIndex: 101, display: 'flex', flexDirection: 'column',
-              backdropFilter: 'blur(24px)',
-            }}
+            className="cosmic-card cosmic-inbox-panel inbox-panel-body"
           >
             {/* Top accent */}
-            <div style={{ height: 1, background: 'linear-gradient(90deg, rgba(200,160,80,0.5), transparent)', flexShrink: 0 }} />
+            <div className="inbox-top-accent" />
 
             {/* Header */}
-            <div style={{ padding: '28px 24px 16px', borderBottom: '1px solid rgba(180,140,80,0.15)', flexShrink: 0 }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
+            <div className="inbox-header">
+              <div className="inbox-header-row">
                 <div>
-                  <h2 style={{ fontFamily: 'Orbitron, sans-serif', color: 'var(--accent-gold)', fontSize: 16, letterSpacing: 4, fontWeight: 700, margin: 0 }}>COSMIC INBOX</h2>
-                  <p style={{ color: 'var(--text-dim)', fontSize: 10, letterSpacing: 3, margin: '4px 0 0', textTransform: 'uppercase' }}>
+                  <h2 className="inbox-title">COSMIC INBOX</h2>
+                  <p className="inbox-subtitle">
                     {inboxFriendFilter
                       ? (() => {
-                          const a = assignments.find(a => { const f = a.friend as any; return f?.id === inboxFriendFilter || f?.userId === inboxFriendFilter; });
-                          const name = a ? ((a.friend as any)?.displayName || (a.friend as any)?.username || 'Friend') : 'Friend';
+                          const a = assignments.find(a => { const f = a.friend as { id?: string; userId?: string } | undefined; return f?.id === inboxFriendFilter || f?.userId === inboxFriendFilter; });
+                          const name = a ? ((a.friend as { displayName?: string; username?: string })?.displayName || (a.friend as { username?: string })?.username || 'Friend') : 'Friend';
                           return `Conversation with ${name}`;
                         })()
                       : unreadCount > 0 ? `${unreadCount} unread transmissions` : 'All transmissions read'
@@ -126,12 +137,7 @@ export default function LetterInbox({ isOpen, onClose, onCompose }: LetterInboxP
                   {inboxFriendFilter && (
                     <button
                       onClick={() => setInboxFriendFilter(null)}
-                      style={{
-                        marginTop: 6, background: 'none', border: 'none', padding: 0,
-                        color: 'var(--accent-gold)', fontSize: 9, letterSpacing: 2,
-                        textTransform: 'uppercase', cursor: 'pointer', opacity: 0.7,
-                        fontFamily: 'Orbitron, sans-serif',
-                      }}
+                      className="inbox-back-btn"
                     >
                       ← View all letters
                     </button>
@@ -140,48 +146,112 @@ export default function LetterInbox({ isOpen, onClose, onCompose }: LetterInboxP
                 <button
                   title="Close"
                   onClick={onClose}
-                  style={{ background: 'none', border: '1px solid rgba(180,140,80,0.25)', color: 'var(--text-dim)', cursor: 'pointer', width: 32, height: 32, display: 'flex', alignItems: 'center', justifyContent: 'center', borderRadius: 2 }}
+                  className="inbox-close-btn"
                 >
                   <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M18 6L6 18M6 6l12 12"/></svg>
                 </button>
               </div>
-              {/* ── Received / Sent tabs ── */}
-              <div style={{ display: 'flex', gap: 0, borderRadius: 2, overflow: 'hidden', border: '1px solid rgba(180,140,80,0.2)' }}>
-                {(['received', 'sent'] as const).map(t => (
+              {/* ── Received / Sent / Clusters tabs ── */}
+              <div className="inbox-tabs">
+                {(['received', 'sent', 'groups'] as const).map(t => (
                   <button
                     key={t}
                     onClick={() => { setTab(t); setExpanded(null); }}
-                    style={{
-                      flex: 1, padding: '8px 0',
-                      background: tab === t ? 'rgba(200,160,80,0.15)' : 'transparent',
-                      border: 'none',
-                      borderRight: t === 'received' ? '1px solid rgba(180,140,80,0.2)' : 'none',
-                      color: tab === t ? 'var(--accent-gold)' : 'var(--text-dim)',
-                      fontFamily: 'Orbitron, sans-serif', fontSize: 9, letterSpacing: 3,
-                      textTransform: 'uppercase', cursor: 'pointer', transition: 'all 0.2s',
-                      display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6,
-                    }}
+                    className={`inbox-tab-btn ${tab === t ? 'inbox-tab-btn--active' : ''}`}
                   >
-                    {t === 'received' ? (
+                    {t === 'received' && (
                       <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"/><polyline points="22,6 12,13 2,6"/></svg>
-                    ) : (
+                    )}
+                    {t === 'sent' && (
                       <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>
                     )}
-                    {t === 'received' ? `Received (${receivedLetters.length})` : `Sent (${sentLetters.length})`}
+                    {t === 'groups' && (
+                      <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
+                    )}
+                    {t === 'received' && `Inbox (${displayedReceived.length})`}
+                    {t === 'sent' && `Sent (${displayedSent.length})`}
+                    {t === 'groups' && `Clusters (${groups.length})`}
                     {t === 'received' && unreadCount > 0 && (
-                      <span style={{ background: 'var(--accent-gold)', color: '#0A0806', borderRadius: '50%', width: 16, height: 16, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 8, fontWeight: 700 }}>{unreadCount}</span>
+                      <span className="inbox-badge">{unreadCount}</span>
                     )}
                   </button>
                 ))}
               </div>
             </div>
+
             {/* Letter list */}
-            <div className="parchment-scroll" style={{ flex: 1, overflowY: 'auto', padding: '12px 0' }}>
-              {activeLetters.length === 0 ? (
-                <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', height: '60%', gap: 12, padding: 24 }}>
+            <div className="parchment-scroll inbox-letter-list">
+              {tab === 'groups' ? (
+                groups.length === 0 ? (
+                  <div className="inbox-empty-state">
+                    <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="rgba(200,160,80,0.3)" strokeWidth="1.5"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
+                    <p className="inbox-empty-text">No active clusters.</p>
+                    <p className="inbox-empty-hint">Create or join a cluster from the Solar System to start chatting.</p>
+                  </div>
+                ) : (
+                  groups.map((g, idx) => {
+                    const hue = getAvatarHue(g.name);
+                    const memberCount = g.members?.length ?? g.memberCount ?? 0;
+                    return (
+                      <motion.div
+                        key={g.id}
+                        initial={{ opacity: 0, x: -12 }}
+                        animate={{ opacity: 1, x: 0 }}
+                        transition={{ delay: idx * 0.04 }}
+                        className="inbox-letter-row inbox-letter-row--read-or-sent"
+                        onClick={() => {
+                          setSelectedGroupId(g.id);
+                          setGroupChatOpen(true);
+                          onClose();
+                        }}
+                      >
+                        {/* Avatar / Icon */}
+                        <div 
+                          className="inbox-letter-avatar" 
+                          style={{ 
+                            ['--avatar-hue' as any]: hue,
+                            border: g.theme_color ? `1px solid ${g.theme_color}` : undefined
+                          }}
+                        >
+                          🛰️
+                        </div>
+
+                        <div className="inbox-letter-row-body">
+                          <div className="inbox-letter-row-header">
+                            <span className="inbox-letter-row-label">
+                              {g.name}
+                            </span>
+                            <span className="inbox-letter-timestamp">
+                              {memberCount} Traveler{memberCount !== 1 ? 's' : ''}
+                            </span>
+                          </div>
+                          <div className="inbox-letter-row-username-row">
+                            <span className="inbox-letter-username">Sector Cluster</span>
+                            {g.theme_color && (
+                              <span 
+                                className="inbox-letter-planet"
+                                style={{ 
+                                  borderColor: g.theme_color,
+                                  color: g.theme_color
+                                }}
+                              >
+                                Channel Active
+                              </span>
+                            )}
+                          </div>
+                          <p className="inbox-preview-text">
+                            Secure subspace connection. Click to open transmission line chat panel.
+                          </p>
+                        </div>
+                      </motion.div>
+                    );
+                  })
+                )
+              ) : activeLetters.length === 0 ? (
+                <div className="inbox-empty-state">
                   <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="rgba(200,160,80,0.3)" strokeWidth="1.5"><path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"/><polyline points="22,6 12,13 2,6"/></svg>
-                  <p style={{ color: 'var(--text-dim)', fontSize: 12, fontStyle: 'italic', fontFamily: "'Exo 2', sans-serif", textAlign: 'center' }}>{tab === 'received' ? 'No transmissions received yet.' : 'No letters sent yet.'}</p>
-                  <p style={{ color: 'var(--text-dim)', fontSize: 10, opacity: 0.6, fontFamily: "'Exo 2', sans-serif" }}>{tab === 'received' ? 'Your inbox is as quiet as deep space.' : 'Compose a letter to begin.'}</p>
+                  <p className="inbox-empty-text">{tab === 'received' ? 'No transmissions received yet.' : 'No letters sent yet.'}</p>
+                  <p className="inbox-empty-hint">{tab === 'received' ? 'Your inbox is as quiet as deep space.' : 'Compose a letter to begin.'}</p>
                 </div>
               ) : (
                 activeLetters.map((letter, idx) => {
@@ -197,53 +267,25 @@ export default function LetterInbox({ isOpen, onClose, onCompose }: LetterInboxP
                       initial={{ opacity: 0, x: -12 }}
                       animate={{ opacity: 1, x: 0 }}
                       transition={{ delay: idx * 0.04 }}
+                      className={`inbox-letter-row ${tab === 'received' && !letter.isRead ? 'inbox-letter-row--unread' : ''} ${tab === 'sent' || letter.isRead ? 'inbox-letter-row--read-or-sent' : ''}`}
                       onClick={() => handleExpand(letter.id, letter.isRead)}
-                      style={{
-                        cursor: 'pointer', padding: '14px 24px', display: 'flex', gap: 12, alignItems: 'flex-start',
-                        // Sent letters never show the unread highlight — only received letters do
-                        borderLeft: `2px solid ${(tab === 'received' && !letter.isRead) ? 'var(--accent-gold)' : 'transparent'}`,
-                        background: (tab === 'received' && !letter.isRead) ? 'rgba(200,160,80,0.03)' : 'transparent',
-                        borderBottom: '1px solid rgba(180,140,80,0.08)',
-                        transition: 'background 0.15s',
-                        opacity: (tab === 'sent' || letter.isRead) ? 0.65 : 1,
-                      }}
-                      onMouseEnter={e => { (e.currentTarget as HTMLDivElement).style.background = 'rgba(200,160,80,0.06)'; }}
-                      onMouseLeave={e => { (e.currentTarget as HTMLDivElement).style.background = (tab === 'received' && !letter.isRead) ? 'rgba(200,160,80,0.03)' : 'transparent'; }}
                     >
                       {/* Avatar */}
-                      <div style={{
-                        width: 36, height: 36, borderRadius: '50%', flexShrink: 0,
-                        display: 'flex', alignItems: 'center', justifyContent: 'center',
-                        fontFamily: 'Orbitron, sans-serif', fontWeight: 700, fontSize: 13, color: '#F0E8D8',
-                        background: `conic-gradient(from 0deg, hsl(${hue},35%,22%), hsl(${hue+60},30%,28%))`,
-                        border: '1px solid rgba(180,140,80,0.25)',
-                      }}>
+                      <div className="inbox-letter-avatar" style={{ ['--avatar-hue' as any]: hue }}>
                         {sender.displayName[0]?.toUpperCase()}
                       </div>
 
-                      <div style={{ flex: 1, minWidth: 0 }}>
-                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: 2 }}>
-                          <span style={{ fontFamily: 'Orbitron, sans-serif', color: tab === 'sent' ? 'rgba(200,160,80,0.75)' : 'var(--text-primary)', fontSize: 12, fontWeight: 600, display: 'flex', alignItems: 'center', gap: 8 }}>
+                      <div className="inbox-letter-row-body">
+                        <div className="inbox-letter-row-header">
+                          <span className={`inbox-letter-row-label ${tab === 'sent' ? 'inbox-letter-row-label--sent' : ''}`}>
                             {rowLabel}
                             {letter.isPending && (
-                              <span style={{
-                                padding: '1px 5px',
-                                background: 'rgba(234, 88, 12, 0.12)',
-                                border: '1px solid rgba(234, 88, 12, 0.35)',
-                                color: '#f97316',
-                                borderRadius: '2px',
-                                fontSize: '8px',
-                                letterSpacing: '1px',
-                                fontFamily: 'Orbitron, sans-serif',
-                                textTransform: 'uppercase',
-                                fontWeight: 700,
-                                transform: 'translateY(-1px)'
-                              }}>
+                              <span className="inbox-scheduled-badge">
                                 Scheduled
                               </span>
                             )}
                           </span>
-                          <span style={{ color: 'var(--text-dim)', fontSize: 10, letterSpacing: 1, flexShrink: 0, marginLeft: 8, fontFamily: 'monospace' }}>
+                          <span className="inbox-letter-timestamp">
                             {letter.isPending
                               ? (letter.scheduledAt ? `Due: ${formatDate(letter.scheduledAt)}` : 'Scheduled')
                               : (tab === 'received' && isFutureSelf(letter))
@@ -252,16 +294,16 @@ export default function LetterInbox({ isOpen, onClose, onCompose }: LetterInboxP
                             }
                           </span>
                         </div>
-                        <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4 }}>
-                          <span style={{ color: 'var(--text-dim)', fontSize: 10, fontFamily: "'Exo 2', sans-serif" }}>@{sender.username}</span>
+                        <div className="inbox-letter-row-username-row">
+                          <span className="inbox-letter-username">@{sender.username}</span>
                           {sender.planet && (
-                            <span style={{ color: 'var(--accent-gold)', fontSize: 9, letterSpacing: 2, textTransform: 'uppercase', fontFamily: 'Orbitron, sans-serif', opacity: 0.7 }}>
+                            <span className="inbox-letter-planet">
                               {sender.planet}
                             </span>
                           )}
                         </div>
-                        <p style={{ color: 'var(--text-dim)', fontSize: 12, fontFamily: "'Exo 2', sans-serif", lineHeight: 1.5, margin: 0, overflow: 'hidden', display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical' as 'vertical' }}>
-                          {letter.content}
+                        <p className="inbox-preview-text">
+                          {DOMPurify.sanitize(letter.content)}
                         </p>
                       </div>
                     </motion.div>
@@ -271,31 +313,14 @@ export default function LetterInbox({ isOpen, onClose, onCompose }: LetterInboxP
             </div>
 
             {/* Footer / Compose Action */}
-            <div style={{ padding: '16px 24px', borderTop: '1px solid rgba(180,140,80,0.15)', background: 'rgba(0,0,0,0.2)', display: 'flex', gap: 10, flexShrink: 0 }}>
+            <div className="inbox-footer">
               <button
                 onClick={() => {
-                  setComposerRecipient(null); // Clear previous locked recipient!
+                  setComposerRecipient(null);
                   onClose();
                   if (onCompose) onCompose();
                 }}
-                style={{
-                  width: '100%', padding: '12px 0',
-                  background: 'linear-gradient(135deg, rgba(200,160,80,0.2), rgba(150,110,50,0.15))',
-                  border: '1px solid var(--accent-gold)',
-                  color: 'var(--accent-gold)', fontFamily: 'Orbitron, sans-serif',
-                  fontSize: 10, letterSpacing: 3, textTransform: 'uppercase', cursor: 'pointer', borderRadius: 2,
-                  display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8,
-                  boxShadow: '0 0 15px rgba(200,160,80,0.1)',
-                  transition: 'all 0.2s',
-                }}
-                onMouseEnter={e => {
-                  (e.currentTarget as HTMLButtonElement).style.background = 'rgba(200,160,80,0.3)';
-                  (e.currentTarget as HTMLButtonElement).style.boxShadow = '0 0 25px rgba(200,160,80,0.25)';
-                }}
-                onMouseLeave={e => {
-                  (e.currentTarget as HTMLButtonElement).style.background = 'linear-gradient(135deg, rgba(200,160,80,0.2), rgba(150,110,50,0.15))';
-                  (e.currentTarget as HTMLButtonElement).style.boxShadow = '0 0 15px rgba(200,160,80,0.1)';
-                }}
+                className="inbox-compose-btn"
               >
                 <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M12 5v14M5 12h14"/></svg>
                 Compose Transmission
@@ -306,59 +331,59 @@ export default function LetterInbox({ isOpen, onClose, onCompose }: LetterInboxP
           {/* Expanded Letter Modal */}
           <AnimatePresence>
             {expanded && expandedLetter && (() => {
-              const sender = getSender(expandedLetter.senderId);
-              const hue = getAvatarHue(sender.username);
+              const isSent = expandedLetter.senderId === user?.id;
+              const targetUserId = isSent ? (expandedLetter.receiverId || expandedLetter.senderId) : expandedLetter.senderId;
+              const person = getSender(targetUserId);
+              const isSelf = expandedLetter.senderId === user?.id && expandedLetter.receiverId === user?.id;
+              const displayName = isSent 
+                ? (isSelf ? 'To: Future Self' : `To: ${person.displayName}`)
+                : person.displayName;
+              const username = person.username;
+              const hue = getAvatarHue(username);
               return (
                 <motion.div
                   key="modal"
                   initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
-                  style={{ position: 'fixed', inset: 0, zIndex: 102, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 24 }}
+                  className="inbox-modal-overlay"
                   onClick={() => setExpanded(null)}
                 >
                   <motion.div
                     initial={{ scale: 0.96, y: 8 }} animate={{ scale: 1, y: 0 }} exit={{ scale: 0.96, y: 8 }}
-                    className="cosmic-card"
-                    style={{ width: '100%', maxWidth: 520, maxHeight: '90vh', overflowY: 'auto', padding: 36, position: 'relative', backdropFilter: 'blur(24px)' }}
+                    className="cosmic-card inbox-modal-card"
                     onClick={e => e.stopPropagation()}
                   >
                     {/* Top rule */}
-                    <div style={{ height: 1, background: 'linear-gradient(90deg, transparent, rgba(200,160,80,0.5), transparent)', position: 'absolute', top: 0, left: 0, right: 0 }} />
+                    <div className="inbox-modal-top-rule" />
 
                     <button
                       title="Close"
                       onClick={() => setExpanded(null)}
-                      style={{ position: 'absolute', top: 16, right: 16, background: 'none', border: 'none', color: 'var(--text-dim)', cursor: 'pointer' }}
+                      className="inbox-modal-close-btn"
                     >
                       <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M18 6L6 18M6 6l12 12"/></svg>
                     </button>
 
-                    {/* Sender */}
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 14, marginBottom: 24 }}>
-                      <div style={{
-                        width: 44, height: 44, borderRadius: '50%', flexShrink: 0,
-                        display: 'flex', alignItems: 'center', justifyContent: 'center',
-                        fontFamily: 'Orbitron, sans-serif', fontWeight: 700, fontSize: 16, color: '#F0E8D8',
-                        background: `conic-gradient(from 0deg, hsl(${hue},35%,22%), hsl(${hue+60},30%,28%))`,
-                        border: '1px solid rgba(180,140,80,0.3)',
-                      }}>
-                        {sender.displayName[0]?.toUpperCase()}
+                    {/* Sender / Recipient */}
+                    <div className="inbox-modal-sender-row">
+                      <div className="inbox-letter-avatar inbox-letter-avatar--large" style={{ ['--avatar-hue' as any]: hue }}>
+                        {person.displayName[0]?.toUpperCase()}
                       </div>
                       <div>
-                        <p style={{ fontFamily: 'Orbitron, sans-serif', color: 'var(--text-primary)', fontSize: 13, fontWeight: 600, margin: 0 }}>{sender.displayName}</p>
-                        <p style={{ color: 'var(--text-dim)', fontSize: 11, margin: '3px 0 0', fontFamily: "'Exo 2', sans-serif" }}>@{sender.username}</p>
+                        <p className="inbox-sender-name">{displayName}</p>
+                        <p className="inbox-sender-username">@{username}</p>
                       </div>
-                      <div style={{ marginLeft: 'auto', textAlign: 'right' }}>
-                        <p style={{ color: 'var(--text-dim)', fontSize: 10, fontFamily: 'monospace', margin: 0 }}>
+                      <div className="inbox-modal-meta">
+                        <p className="inbox-meta-date">
                           Sent: {formatDate(expandedLetter.createdAt)}
                         </p>
                         {expandedLetter.senderId === user?.id && expandedLetter.scheduledAt && (
-                          <p style={{ color: 'var(--accent-gold)', fontSize: 10, fontFamily: 'monospace', margin: '4px 0 0' }}>
+                          <p className="inbox-meta-delivered">
                             Delivered: {formatDate(expandedLetter.scheduledAt)}
                           </p>
                         )}
-                        {sender.planet && sender.planet !== 'Sun' && (
-                          <p style={{ color: 'var(--accent-gold)', fontSize: 9, letterSpacing: 2, textTransform: 'uppercase', fontFamily: 'Orbitron, sans-serif', margin: '3px 0 0', opacity: 0.8 }}>
-                            {sender.planet}
+                        {person.planet && person.planet !== 'Sun' && (
+                          <p className="inbox-meta-planet">
+                            {person.planet}
                           </p>
                         )}
                       </div>
@@ -366,40 +391,34 @@ export default function LetterInbox({ isOpen, onClose, onCompose }: LetterInboxP
 
                     {/* Diamond divider */}
                     <div className="parchment-divider">
-                      <span style={{ color: 'var(--text-dim)', fontSize: 9, letterSpacing: 3 }}>◆</span>
+                      <span className="parchment-diamond">◆</span>
                     </div>
 
                     {/* Letter body — minHeight ensures the paper always looks like a full sheet */}
-                    <div style={{ position: 'relative', overflow: 'hidden', background: 'var(--input-bg)', border: '1px solid var(--input-border)', borderRadius: 2, padding: '20px 24px', marginBottom: 24, minHeight: 320, ...(expandedLetter.paperSkin ? PAPER_STYLES[expandedLetter.paperSkin] : {}) }}>
-                      {expandedLetter.stickers && expandedLetter.stickers.map((sticker: any) => (
+                    <div className="inbox-letter-paper" style={expandedLetter.paperSkin ? PAPER_STYLES[expandedLetter.paperSkin] : {}}>
+                      {expandedLetter.stickers && expandedLetter.stickers.map((sticker: { id: string; x: number; y: number; rot: number; iconId: string }) => (
                         <div
                           key={sticker.id}
+                          className="inbox-letter-sticker"
                           style={{
-                            position: 'absolute',
                             left: `${sticker.x}%`,
                             top: `${sticker.y}%`,
                             transform: `translate(-50%, -50%) rotate(${sticker.rot}deg)`,
-                            width: '32px',
-                            height: '32px',
-                            opacity: 0.8,
-                            color: expandedLetter.paperSkin ? PAPER_STYLES[expandedLetter.paperSkin].color : 'var(--text-primary)',
-                            pointerEvents: 'none'
                           }}
                         >
                           {STICKERS[sticker.iconId]}
                         </div>
                       ))}
-                      <p style={{ position: 'relative', zIndex: 10, color: expandedLetter.paperSkin ? PAPER_STYLES[expandedLetter.paperSkin].color : 'var(--text-primary)', lineHeight: '32px', fontSize: '18px', whiteSpace: 'pre-wrap', margin: 0, fontFamily: '"Special Elite", cursive' }}>
-                        {expandedLetter.content}
+                      <p className="inbox-letter-content">
+                        {DOMPurify.sanitize(expandedLetter.content)}
                       </p>
                     </div>
 
                     {/* Actions */}
-                    <div style={{ display: 'flex', gap: 10 }}>
+                    <div className="inbox-actions-row">
                       {onCompose && (
                         <button
                           onClick={() => {
-                            // Reply to the OTHER party: if current user sent it, reply to receiver; otherwise reply to sender
                             const replyToId = expandedLetter.senderId === user?.id
                               ? expandedLetter.receiverId
                               : expandedLetter.senderId;
@@ -412,16 +431,7 @@ export default function LetterInbox({ isOpen, onClose, onCompose }: LetterInboxP
                             });
                             setExpanded(null); onClose(); onCompose();
                           }}
-                          style={{
-                            flex: 1, padding: '10px 0',
-                            background: 'transparent', border: '1px solid var(--accent-gold)',
-                            color: 'var(--accent-gold)', fontFamily: 'Orbitron, sans-serif',
-                            fontSize: 9, letterSpacing: 3, textTransform: 'uppercase', cursor: 'pointer', borderRadius: 2,
-                            display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6,
-                            transition: 'background 0.2s',
-                          }}
-                          onMouseEnter={e => { (e.currentTarget as HTMLButtonElement).style.background = 'rgba(200,160,80,0.1)'; }}
-                          onMouseLeave={e => { (e.currentTarget as HTMLButtonElement).style.background = 'transparent'; }}
+                          className="inbox-action-btn"
                         >
                           <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"/><polyline points="22,6 12,13 2,6"/></svg>
                           REPLY
@@ -430,15 +440,7 @@ export default function LetterInbox({ isOpen, onClose, onCompose }: LetterInboxP
                       {!expandedLetter.isRead && (
                         <button
                           onClick={() => handleRead(expandedLetter.id, false)}
-                          style={{
-                            flex: 1, padding: '10px 0',
-                            background: 'transparent', border: '1px solid rgba(180,140,80,0.2)',
-                            color: 'var(--text-dim)', fontFamily: 'Orbitron, sans-serif',
-                            fontSize: 9, letterSpacing: 3, textTransform: 'uppercase', cursor: 'pointer', borderRadius: 2,
-                            transition: 'background 0.2s',
-                          }}
-                          onMouseEnter={e => { (e.currentTarget as HTMLButtonElement).style.background = 'rgba(180,140,80,0.05)'; }}
-                          onMouseLeave={e => { (e.currentTarget as HTMLButtonElement).style.background = 'transparent'; }}
+                          className="inbox-action-btn inbox-action-btn--dim"
                         >
                           MARK READ
                         </button>

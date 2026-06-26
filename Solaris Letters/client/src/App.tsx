@@ -6,6 +6,7 @@ import LoginPage from './pages/Login';
 import RegisterPage from './pages/Register';
 
 import LandingPage from './pages/LandingPage';
+import ResetPasswordPage from './pages/ResetPassword';
 
 function ProtectedRoute({ children }: { children: React.ReactNode }) {
   const token = localStorage.getItem('cosmimail_token');
@@ -31,6 +32,11 @@ function AuthListener() {
           localStorage.removeItem('cosmimail_token');
           localStorage.removeItem('cosmimail_user');
           navigate('/login');
+        }
+        // Supabase fires this event when the user clicks the password reset email link.
+        // We must navigate to the reset page so the session token is available for updateUser().
+        if (event === 'PASSWORD_RECOVERY') {
+          navigate('/reset-password', { replace: true });
         }
       }
     );
@@ -60,6 +66,7 @@ export default function App() {
             <HomePage />
           </ProtectedRoute>
         } />
+        <Route path="/reset-password" element={<ResetPasswordPage />} />
         <Route path="*" element={<Navigate to="/home" replace />} />
       </Routes>
     </BrowserRouter>

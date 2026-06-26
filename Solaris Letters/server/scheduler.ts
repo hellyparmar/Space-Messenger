@@ -56,8 +56,14 @@ async function deliverPendingLetters() {
         letterId:     letter.id,
       };
 
-      // Emit to recipient's room
-      io.to(letter.recipient_id).emit('new_letter', payload);
+      // Emit to recipient's room if recipient has not blocked sender
+      const blockCheck = await (prisma as any).$queryRawUnsafe(
+        `SELECT 1 FROM blackhole_entries WHERE user_id = $1 AND target_id = $2`,
+        letter.recipient_id, letter.sender_id
+      );
+      if (blockCheck.length === 0) {
+        io.to(letter.recipient_id).emit('new_letter', payload);
+      }
 
       // Mark as notified so we don't send it again
       await (prisma as any).letter.update({

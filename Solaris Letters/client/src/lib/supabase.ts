@@ -2,12 +2,11 @@ import { createClient } from '@supabase/supabase-js';
 
 const rawUrl = import.meta.env.VITE_SUPABASE_URL as string | undefined;
 const rawKey = import.meta.env.VITE_SUPABASE_ANON_KEY as string | undefined;
-
 if (!rawUrl || !rawUrl.startsWith('https://')) {
-  console.error('[Supabase] VITE_SUPABASE_URL is missing or not a valid https:// URL. Got:', rawUrl);
+  console.error('[Supabase] VITE_SUPABASE_URL is missing or not a valid https:// URL.');
 }
 if (!rawKey || rawKey.length < 20) {
-  console.error('[Supabase] VITE_SUPABASE_ANON_KEY is missing or too short. Got:', rawKey);
+  console.error('[Supabase] VITE_SUPABASE_ANON_KEY is missing or too short.');
 }
 
 // Guard: createClient throws if URL doesn't start with https://

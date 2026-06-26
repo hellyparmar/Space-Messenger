@@ -1,0 +1,18 @@
+[build]
+  base    = "Solaris Letters/client"
+  command = "npm install && npm run build"
+  publish = "Solaris Letters/client/dist"
+
+# Redirect all routes to index.html so React Router handles them (SPA)
+[[redirects]]
+  from   = "/*"
+  to     = "/index.html"
+  status = 200
+
+[[headers]]
+  for = "/*"
+  [headers.values]
+    X-Frame-Options = "DENY"
+    X-Content-Type-Options = "nosniff"
+    Referrer-Policy = "strict-origin-when-cross-origin"
+
