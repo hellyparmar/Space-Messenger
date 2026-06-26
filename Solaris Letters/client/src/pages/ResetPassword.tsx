@@ -92,6 +92,8 @@ export default function ResetPasswordPage() {
                   setError('');
                 }}
                 placeholder="••••••••"
+                autoComplete="new-password"
+                autoFocus={false}
                 className="w-full bg-[var(--input-bg)] border-b border-[var(--input-border)] py-2 px-1 text-[var(--text-primary)] placeholder:text-[var(--text-dim)]/30 focus:outline-none focus:border-[var(--accent-gold)] focus:shadow-[0_2px_0_rgba(200,160,80,0.2)] transition-all font-sans"
                 required
               />
@@ -108,6 +110,8 @@ export default function ResetPasswordPage() {
                   setError('');
                 }}
                 placeholder="••••••••"
+                autoComplete="new-password"
+                autoFocus={false}
                 className="w-full bg-[var(--input-bg)] border-b border-[var(--input-border)] py-2 px-1 text-[var(--text-primary)] placeholder:text-[var(--text-dim)]/30 focus:outline-none focus:border-[var(--accent-gold)] focus:shadow-[0_2px_0_rgba(200,160,80,0.2)] transition-all font-sans"
                 required
               />
