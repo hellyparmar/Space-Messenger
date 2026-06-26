@@ -7,16 +7,10 @@ const isProd = !SOCKET_URL.includes('localhost') && !SOCKET_URL.includes('127.0.
 let socket: Socket | null = null;
 
 async function wakeServer() {
-  // Only ping the Render production URL in production — in dev it causes CORS noise
-  if (isProd) {
-    try {
-      await fetch('https://solaris-letters-server.onrender.com/ping');
-    } catch { /* server still starting, socket reconnection will handle it */ }
-  }
+  if (!isProd) return;  // never ping in dev — Vite proxy handles it
   try {
-    const pingUrl = SOCKET_URL.replace(/^ws/, 'http') + '/ping';
-    await fetch(pingUrl);
-  } catch { /* server still starting, socket reconnection will handle it */ }
+    await fetch(`${SOCKET_URL}/ping`);
+  } catch { /* server still starting — socket reconnection will handle it */ }
 }
 
 // Initial wake on file load
