@@ -25,7 +25,7 @@ wakeServer();
 export function getSocket(): Socket {
   if (!socket) {
     socket = io(SOCKET_URL, {
-      transports: ['websocket'],
+      transports: ['polling', 'websocket'],
       autoConnect: false,
       reconnection: true,
       reconnectionAttempts: 10,
