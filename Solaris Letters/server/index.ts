@@ -37,7 +37,7 @@ const PORT   = Number(process.env.PORT) || 4000;
 
 // Allow comma-separated origins via CORS_ORIGIN env var
 // e.g. "https://your-app.netlify.app,http://localhost:5173"
-const ALLOWED_ORIGINS = (process.env.CORS_ORIGIN || 'https://space-messengerr.netlify.app,http://localhost:5173,http://127.0.0.1:5173')
+const ALLOWED_ORIGINS = (process.env.CORS_ORIGIN || 'https://space-messengerr.netlify.app,https://space-messenger.netlify.app,http://localhost:5173,http://127.0.0.1:5173')
   .split(',')
   .map((o) => o.trim());
 
