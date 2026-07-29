@@ -272,16 +272,6 @@ export default function LandingPage() {
         
         {/* Top Header Section */}
         <div className="flex flex-col items-center mt-2 md:mt-4 text-center">
-          <motion.div
-            initial={{ opacity: 0, scale: 0.8 }}
-            animate={{ opacity: 1, scale: 1 }}
-            transition={{ duration: 0.6 }}
-            className="px-4 py-1 rounded-full border border-cyan-500/30 bg-cyan-950/20 text-cyan-400 text-[9px] font-bold uppercase tracking-[0.25em] font-orbitron mb-3 md:mb-4 shadow-[0_0_15px_rgba(6,182,212,0.15)] flex items-center gap-1.5"
-          >
-            <span className="w-1.5 h-1.5 rounded-full bg-cyan-400 animate-pulse" />
-            BETA ACTIVE
-          </motion.div>
-
           <motion.h1
             initial={{ opacity: 0, y: -20 }}
             animate={{ opacity: 1, y: 0 }}
@@ -369,7 +359,7 @@ export default function LandingPage() {
           <p className="text-[9px] text-white/20 font-medium tracking-widest uppercase flex items-center justify-center gap-1.5 select-text">
             <span>© 2026 Space Messenger</span>
             <span>·</span>
-            <span>Made with ✦ from the Sun</span>
+            <span>Made with ♥︎ by Helly</span>
           </p>
         </div>
 
